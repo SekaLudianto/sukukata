@@ -3,7 +3,7 @@ import { DictionaryEntry, GameState, TurnHistory, IndoFinityMessage, LiveAttempt
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Skull, BrainCircuit, Wifi, WifiOff, Home, Loader2, Server, User } from 'lucide-react';
+import { Play, Power, MessageSquare, Users, Trophy, Skull, BrainCircuit, Wifi, WifiOff, Home, Loader2, Server, User, Globe } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
 // --- Varied Roasts for Live Game ---
@@ -54,6 +54,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack }) => {
     const [chatScore, setChatScore] = useState(0);
 
     // Live Specific State
+    const [serverIp, setServerIp] = useState('localhost'); // New state for IP
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false); // New state for loading
     const [liveAttempts, setLiveAttempts] = useState<LiveAttempt[]>([]);
@@ -130,8 +131,12 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack }) => {
         setIsConnecting(true); 
 
         try {
-            // Socket IO Endpoint according to documentation
-            const socket = io('http://localhost:62025', {
+            // Socket IO Endpoint according to documentation (and manual input)
+            // Default port is 62025
+            const connectionString = `http://${serverIp}:62025`;
+            console.log("Connecting to:", connectionString);
+
+            const socket = io(connectionString, {
                 transports: ['websocket', 'polling']
             });
 
@@ -223,6 +228,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack }) => {
                 console.error("Socket Connection Error", err);
                 setIsConnected(false);
                 setIsConnecting(false);
+                alert(`Gagal konek ke ${serverIp}:62025. Cek IP/koneksi.`);
             });
 
             socketRef.current = socket;
@@ -230,7 +236,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack }) => {
             console.error("Socket Init Failed", e);
             setIsConnecting(false);
         }
-    }, [executeMove]); 
+    }, [executeMove, serverIp]); 
 
     // Clean up on unmount
     useEffect(() => {
@@ -327,7 +333,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack }) => {
                             <WifiOff size={14} className="text-rose-500" />
                         )}
                         <span className={`text-[10px] font-bold ${isConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {isConnecting ? "CONNECTING..." : (isConnected ? "SOCKET.IO CONNECTED" : "SOCKET.IO DISCONNECTED")}
+                            {isConnecting ? "CONNECTING..." : (isConnected ? "CONNECTED" : "DISCONNECTED")}
                         </span>
                     </div>
                 </div>
@@ -366,26 +372,45 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack }) => {
                             </h1>
                             
                             {!isConnected ? (
-                                <div className="flex flex-col items-center gap-4">
-                                    <p className="text-slate-400 max-w-md mx-auto text-sm">
-                                        Sambungkan ke server TikTok Live (IndoFinity) terlebih dahulu untuk mulai membaca komentar.
-                                        <br/>
-                                        <span className="text-xs text-slate-500 font-mono mt-2 block">Endpoint: http://localhost:62025</span>
+                                <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto">
+                                    <p className="text-slate-400 text-sm">
+                                        Sambungkan ke server TikTok Live (IndoFinity) untuk mulai.
                                     </p>
+                                    
+                                    {/* IP Input */}
+                                    <div className="w-full bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider flex items-center gap-1">
+                                                <Globe size={10} /> IP Server IndoFinity
+                                            </label>
+                                            <span className="text-[10px] text-slate-500 font-mono">:62025</span>
+                                        </div>
+                                        <input 
+                                            type="text" 
+                                            value={serverIp}
+                                            onChange={(e) => setServerIp(e.target.value)}
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-center focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-600"
+                                            placeholder="localhost"
+                                        />
+                                        <p className="text-[10px] text-slate-500 mt-1 italic text-center">
+                                            *Gunakan IP PC (misal: 192.168.1.5) jika main di HP
+                                        </p>
+                                    </div>
+
                                     <button 
                                         onClick={connectSocket}
                                         disabled={isConnecting}
-                                        className={`px-8 py-4 rounded-xl font-bold text-xl shadow-lg transition-all transform hover:scale-105 active:scale-95 flex items-center gap-3 mx-auto ${isConnecting ? 'bg-slate-600 text-slate-300 cursor-wait' : 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-900/50'}`}
+                                        className={`w-full px-8 py-4 rounded-xl font-bold text-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-3 ${isConnecting ? 'bg-slate-600 text-slate-300 cursor-wait' : 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-900/50'}`}
                                     >
                                         {isConnecting ? <Loader2 className="animate-spin" /> : <Server />} 
-                                        {isConnecting ? 'MENGHUBUNGKAN...' : 'SAMBUNGKAN (Socket.IO)'}
+                                        {isConnecting ? 'MENGHUBUNGKAN...' : 'SAMBUNGKAN'}
                                     </button>
                                 </div>
                             ) : (
                                 <div className="space-y-6 animate-fade-in">
                                     <div className="bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-lg inline-flex items-center gap-2">
                                         <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                        <span className="text-emerald-400 font-bold text-sm">Server Terhubung! Siap bermain.</span>
+                                        <span className="text-emerald-400 font-bold text-sm">Server Terhubung ({serverIp})</span>
                                     </div>
                                     <div className="p-4 bg-slate-800/50 rounded-xl border border-slate-700 max-w-sm mx-auto text-sm text-left space-y-2">
                                         <div className="flex gap-2">
