@@ -1,0 +1,5 @@
+{
+  "name": "SukuKata.ai",
+  "description": "A fast-paced, 5-letter word chain game (Sambung Kata) against an algorithmic AI. Features smart syllable detection, dictionary validation, and a sleek modern UI.",
+  "requestFramePermissions": []
+}
