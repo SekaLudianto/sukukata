@@ -1,6 +1,49 @@
 import { DictionaryEntry } from "../types";
 
 /**
+ * Cek apakah kata layak dimainkan dalam game sambung kata secara struktural.
+ * Kata dianggap layak jika memiliki vokal pada 3 huruf terakhirnya.
+ * Ini untuk menghindari singkatan seperti RAPBN, PBB, dll yang mungkin lolos filter metadata.
+ */
+export const isPlayableWord = (word: string): boolean => {
+    if (!word || word.length !== 5) return false;
+    
+    const w = word.toUpperCase();
+    const vowels = ['A', 'E', 'I', 'O', 'U'];
+    
+    // Cek apakah ada vokal di indeks 2, 3, atau 4 (3 huruf terakhir)
+    // Contoh: RAPBN -> P(2), B(3), N(4) -> Tidak ada vokal -> False
+    // Contoh: BATUK -> T(2), U(3), K(4) -> Ada U -> True
+    return vowels.some(v => w[2] === v || w[3] === v || w[4] === v);
+};
+
+/**
+ * Validasi item kamus secara menyeluruh.
+ * Memeriksa struktur kata dan metadata (bahasa/jenis kata).
+ */
+export const isValidDictionaryItem = (item: any): boolean => {
+    // 1. Validasi bentuk data dasar
+    if (!item || typeof item !== 'object') return false;
+    if (typeof item.word !== 'string' || item.word.length !== 5) return false;
+    if (!item.arti) return false;
+
+    // 2. Filter berdasarkan metadata 'bahasa'
+    // Jika ditandai sebagai singkatan, akronim, atau kependekan -> TOLAK
+    if (item.bahasa) {
+        const bahasa = item.bahasa.toLowerCase();
+        if (bahasa.includes('singkatan') || 
+            bahasa.includes('akronim') || 
+            bahasa.includes('kependekan')) {
+            return false;
+        }
+    }
+
+    // 3. Filter berdasarkan struktur kata (Phonotactics)
+    // Memastikan kata memiliki vokal yang cukup untuk dipotong menjadi suku kata
+    return isPlayableWord(item.word);
+};
+
+/**
  * Logika Pengecekan Suffix (Akhiran) untuk Sambung Kata.
  * Aturan:
  * 1. Umum: Ambil Konsonan + Vokal Terakhir + Ekor. Contoh: BATUK -> TUK.
@@ -25,22 +68,22 @@ export const getSyllableSuffix = (word: string): string => {
         }
     }
 
-    // Safety: jika tidak ada vokal (sangat jarang/singkatan), kembalikan kata utuh
-    if (lastVowelIndex === -1) return w;
+    // Fallback: jika tidak ada vokal, atau vokal terlalu di depan (seperti singkatan RAPBN),
+    // Ambil 3 huruf terakhir.
+    if (lastVowelIndex === -1 || lastVowelIndex < 2) {
+        return w.slice(-3);
+    }
 
     // Cek karakter sebelum vokal terakhir
     const prevIndex = lastVowelIndex - 1;
-    
-    // Jika vokal ada di huruf pertama (misal: UBI), kembalikan kata utuh
-    if (prevIndex < 0) return w;
-
     const prevChar = w[prevIndex];
+
+    let suffix = w;
 
     if (!isVowel(prevChar)) {
         // KASUS 1: Didahului Konsonan (Pola Standar)
         // Contoh: BA-TUK (Vokal U, didahului T). Suffix: TUK
-        // Contoh: MA-KAN (Vokal A, didahului K). Suffix: KAN
-        return w.slice(prevIndex);
+        suffix = w.slice(prevIndex);
     } else {
         // KASUS 2: Didahului Vokal (Urutan Vokal-Vokal / V-V)
         
@@ -48,32 +91,28 @@ export const getSyllableSuffix = (word: string): string => {
         const hasCoda = lastVowelIndex < len - 1;
 
         if (hasCoda) {
-            // Pola: ...VVC(C) (Ada huruf mati di belakang)
-            // Ini biasanya memisahkan vokal tersebut. Kita potong di antara vokal.
-            // Contoh: SA-ING. (Akhiran NG). Vokal terakhir I. Sebelumnya A. 
-            // Karena ada NG, kita ambil mulai dari I. -> ING.
-            // Contoh: DA-UN. -> UN.
-            // Contoh: BA-UNG. -> UNG.
-            // Contoh: KA-IL. -> IL.
-            return w.slice(lastVowelIndex);
+            // Pola: ...VVC(C)
+            // Contoh: SA-ING -> ING.
+            suffix = w.slice(lastVowelIndex);
         } else {
             // Pola: ...VV (Berakhiran Vokal Ganda)
-            // Ini biasanya dianggap satu kesatuan bunyi (diftong) dalam permainan kata.
-            // Kita ambil konsonan sebelum pasangan vokal ini.
-            
             const prePrevIndex = prevIndex - 1;
             if (prePrevIndex >= 0) {
-                // Contoh: PAN-TAI. Vokal terakhir I. Sebelumnya A. Tidak ada ekor.
-                // Ambil T sebelumnya. -> TAI.
-                // Contoh: PU-LAU. -> LAU.
-                // Contoh: SE-POI. -> POI.
-                return w.slice(prePrevIndex);
+                // Contoh: PAN-TAI -> TAI.
+                suffix = w.slice(prePrevIndex);
             } else {
-                // Kata dimulai dengan Vokal ganda (jarang untuk 5 huruf).
-                return w;
+                suffix = w;
             }
         }
     }
+    
+    // Safety Net: Jika hasil suffix sama dengan kata utuh (untuk kata 5 huruf),
+    // paksa ambil 3 huruf terakhir agar permainan tetap seru.
+    if (suffix.length === w.length && w.length === 5) {
+        return w.slice(-3);
+    }
+
+    return suffix;
 };
 
 export const findAIWord = (
@@ -129,7 +168,6 @@ export const validateUserWord = (
     }
 
     // Cek Kamus
-    // Kita cari persis word-nya
     const entry = dictionary.find(d => d.word.toUpperCase() === w);
     if (!entry) {
         return { valid: false, error: "Gak ada di kamus!" };

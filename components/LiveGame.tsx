@@ -3,8 +3,8 @@ import { DictionaryEntry, GameState, TurnHistory, LiveAttempt, GameMode, Leaderb
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Skull, BrainCircuit, Wifi, WifiOff, Home, Loader2, Server, User, Globe, Swords, Zap, Crown, Medal, UserPlus, PlayCircle, ArrowRightLeft, Clock } from 'lucide-react';
-import { io, Socket } from 'socket.io-client';
+import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock } from 'lucide-react';
+import { io } from 'socket.io-client';
 
 // --- Varied Roasts for Live Game ---
 const LIVE_ROASTS = {
@@ -73,7 +73,10 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
     const [activeMatchIndex, setActiveMatchIndex] = useState<number | null>(null);
     const [knockoutChampion, setKnockoutChampion] = useState<KnockoutPlayer | null>(null);
     const [knockoutPhase, setKnockoutPhase] = useState<'LOBBY' | 'BRACKET' | 'FINISHED'>('LOBBY');
-    const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState<string | null>(null); // Who's turn is it?
+    const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState<string | null>(null);
+    
+    // New State for Knockout Flow Control
+    const [matchStartCountdown, setMatchStartCountdown] = useState<number | null>(null);
 
     const socketRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -93,15 +96,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         matches,
         lobbyPlayers,
         pastPlayerIds,
-        currentTurnPlayerId
+        currentTurnPlayerId,
+        matchStartCountdown
     });
 
     useEffect(() => {
         stateRef.current = { 
             gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard,
-            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId
+            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown
         };
-    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId]);
+    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown]);
 
     // --- Logic: Knockout Tournament ---
     
@@ -113,6 +117,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         setKnockoutChampion(null);
         setHistory([]);
         setCurrentTurnPlayerId(null);
+        setMatchStartCountdown(null);
     };
 
     const startKnockoutTournament = () => {
@@ -150,33 +155,55 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
 
         setMatches(initialMatches);
         setKnockoutPhase('BRACKET');
-        setActiveMatchIndex(0);
-        
-        // Start first match
-        startMatch(0, initialMatches);
+        prepareMatch(0, initialMatches);
     };
 
-    const startMatch = (matchIdx: number, currentMatches?: KnockoutMatch[]) => {
-        setGameState(GameState.PLAYING);
+    // New Function: Prepare match with countdown
+    const prepareMatch = (matchIdx: number, currentMatches: KnockoutMatch[]) => {
+        setActiveMatchIndex(matchIdx);
+        setGameState(GameState.IDLE); // Set IDLE so we can show "Next Match" UI
         setHistory([]);
         setUsedWords(new Set());
         setRequiredPrefix(null);
-        setActiveMatchIndex(matchIdx);
         
-        const matchList = currentMatches || matches;
-        const match = matchList[matchIdx];
-
+        const match = currentMatches[matchIdx];
         if (match.p1 && match.p2) {
+             // 15 Seconds Countdown before start
+             setMatchStartCountdown(15);
+        }
+    };
+
+    // Countdown Effect for Match Start
+    useEffect(() => {
+        let interval: number;
+        if (knockoutPhase === 'BRACKET' && matchStartCountdown !== null && matchStartCountdown > 0) {
+            interval = window.setInterval(() => {
+                setMatchStartCountdown(prev => (prev !== null ? prev - 1 : null));
+            }, 1000);
+        } else if (knockoutPhase === 'BRACKET' && matchStartCountdown === 0) {
+            // Start the actual game
+            runMatch();
+        }
+        return () => clearInterval(interval);
+    }, [matchStartCountdown, knockoutPhase]);
+
+
+    const runMatch = () => {
+        setMatchStartCountdown(null);
+        setGameState(GameState.PLAYING);
+        
+        const currentMatches = stateRef.current.matches;
+        const matchIdx = stateRef.current.activeMatchIndex;
+        
+        if (matchIdx !== null && currentMatches[matchIdx]) {
+            const match = currentMatches[matchIdx];
             // Randomly decide who starts
             const starter = Math.random() > 0.5 ? match.p1 : match.p2;
-            setCurrentTurnPlayerId(starter.uniqueId);
+            if (starter) setCurrentTurnPlayerId(starter.uniqueId);
 
-            // AI gives initial word to start the duel
+            // AI gives initial word
             const randomStart = dictionary[Math.floor(Math.random() * dictionary.length)];
             executeMove(randomStart.word, 'ai', randomStart.arti);
-        } else {
-             // Should not happen if logic is correct, but safe fallback
-             console.error("Match started without players");
         }
     };
 
@@ -198,15 +225,22 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
             
             setMatches(currentMatches);
             
-            // Determine next match to play
-            // Simple logic: 0->1->2->3 (QFs) -> 4->5 (SFs) -> 6 (Final)
-            const nextIdx = currentIdx + 1;
+            // Show winner momentarily
+            setGameState(GameState.VICTORY); // Use VICTORY state to show "WINNER" overlay
+            setRoastMessage(`Pemenang: ${winner.nickname}`);
+            setGameOverReason("Melaju ke babak selanjutnya!");
             
-            if (nextIdx < currentMatches.length) {
-                // Small delay before next match
-                setGameState(GameState.IDLE); // Temporary pause
-                setTimeout(() => startMatch(nextIdx, currentMatches), 3000);
-            }
+            // Delay before preparing next match
+            setTimeout(() => {
+                // Determine next match to play
+                // We just play 0, 1, 2, 3, 4, 5, 6 in order
+                let nextIdx = currentIdx + 1;
+                
+                // Skip if next match players aren't ready (shouldn't happen in this logic flow if we go 0-6)
+                if (nextIdx < currentMatches.length) {
+                    prepareMatch(nextIdx, currentMatches);
+                }
+            }, 4000); // 4 seconds to see winner
         } else {
             // This was the final match (Match 6)
             setMatches(currentMatches);
@@ -222,7 +256,6 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         const randName = fakeNames[Math.floor(Math.random() * fakeNames.length)] + Math.floor(Math.random()*100);
         const uniqueId = randName.toLowerCase().replace(/\s/g, '');
         
-        // Inject into logic manually
         const current = stateRef.current;
         if (current.knockoutPhase === 'LOBBY') {
              if (current.pastPlayerIds.has(uniqueId)) return;
@@ -230,27 +263,6 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                 if (prev.find(p => p.uniqueId === uniqueId)) return prev;
                 return [...prev, { uniqueId: uniqueId, nickname: randName, profilePictureUrl: undefined }];
             });
-        }
-    };
-
-    const simulateCorrectAnswer = () => {
-        const current = stateRef.current;
-        if (current.mode === GameMode.LIVE_KNOCKOUT && current.knockoutPhase === 'BRACKET' && current.activeMatchIndex !== null) {
-            const match = current.matches[current.activeMatchIndex];
-            const currentTurnId = current.currentTurnPlayerId;
-            
-            if (match.p1 && match.p2 && currentTurnId) {
-                // Find the player object
-                const player = match.p1.uniqueId === currentTurnId ? match.p1 : match.p2;
-                
-                // Find a valid word starting with prefix
-                const prefix = current.requiredPrefix || '';
-                const word = findAIWord(current.dictionary, prefix, current.usedWords);
-                
-                if (word) {
-                    executeMove(word.word, 'chat', word.arti, player.nickname, player.profilePictureUrl, player.uniqueId);
-                }
-            }
         }
     };
 
@@ -274,14 +286,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         const currentMode = stateRef.current.mode;
         const phase = stateRef.current.knockoutPhase;
 
-        // Timer setting
-        if (currentMode === GameMode.LIVE_KNOCKOUT) {
-             setTimeLeft(10); // Fast pace for duel
-        } else if (currentMode === GameMode.LIVE_VS_NETIZEN) {
-             setTimeLeft(20); 
-        } else {
-             setTimeLeft(player === 'ai' ? 30 : 15); 
-        }
+        // Timer setting - Universal 30 seconds
+        setTimeLeft(30);
         
         if (player === 'ai') {
              setIsAiTurn(false);
@@ -335,6 +341,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         setGameState(state);
         setGameOverReason(reason);
         setIsAiTurn(false);
+        setMatchStartCountdown(null); // Clear countdown if game ends
         
         if (state === GameState.VICTORY) {
             setRoastMessage(getRandomRoast('win'));
@@ -380,14 +387,17 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                 if (cleanWord === 'JOIN' || cleanWord === 'IKUT') {
                                     if (current.pastPlayerIds.has(uniqueId)) return;
                                     setLobbyPlayers(prev => {
+                                        // Prevent duplicate join
                                         if (prev.find(p => p.uniqueId === uniqueId)) return prev;
+                                        // Limit to 8 players
+                                        if (prev.length >= 8) return prev;
                                         return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
                                     });
                                 }
                                 return;
                             }
 
-                            // Match Phase
+                            // Match Phase - only process inputs if playing
                             if (current.knockoutPhase === 'BRACKET' && current.gameState === GameState.PLAYING && current.activeMatchIndex !== null) {
                                 // STRICT TURN ENFORCEMENT
                                 // Check if the message is from the player whose turn it is
@@ -540,10 +550,10 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
     const KnockoutView = () => {
         if (knockoutPhase === 'LOBBY') {
             return (
-                <div className="text-center space-y-6 relative w-full max-w-4xl mx-auto">
+                <div className="text-center space-y-6 relative w-full max-w-4xl mx-auto flex flex-col items-center">
                     {/* Connection UI for Knockout */}
                     {!isConnected && (
-                        <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 backdrop-blur-sm mb-6 max-w-md mx-auto relative z-30">
+                        <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 backdrop-blur-sm mb-6 max-w-md mx-auto relative z-30 w-full">
                             <h3 className="text-indigo-400 font-bold mb-3 flex items-center justify-center gap-2"><Server size={18}/> KONEKSI SERVER LIVE</h3>
                              <div className="flex gap-2">
                                 <input 
@@ -572,14 +582,14 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                         </div>
                     )}
 
-                    <div className="p-4 border-2 border-purple-500/50 bg-purple-900/20 rounded-2xl animate-pulse">
-                        <h2 className="text-2xl font-bold text-purple-300 mb-2">LOBBY TURNAMEN (8 SLOT)</h2>
+                    <div className="p-4 border-2 border-purple-500/50 bg-purple-900/20 rounded-2xl animate-pulse w-full max-w-md">
+                        <h2 className="text-2xl font-bold text-purple-300 mb-2">LOBBY TURNAMEN</h2>
                         <p className="text-white text-lg">Ketik <span className="font-mono bg-white text-purple-900 px-2 rounded">JOIN</span> di komentar!</p>
                         <p className="text-sm text-slate-400 mt-2">Peserta: {lobbyPlayers.length} / 8</p>
                         <p className="text-xs text-rose-400 italic">Pemain sebelumnya tidak bisa ikut.</p>
                     </div>
                     
-                    <div className="grid grid-cols-4 gap-2 max-w-lg mx-auto">
+                    <div className="grid grid-cols-4 gap-2 max-w-lg mx-auto w-full">
                         {Array.from({ length: 8 }).map((_, i) => {
                             const p = lobbyPlayers[i];
                             return (
@@ -587,16 +597,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                     {p ? (
                                         <>
                                             {p.profilePictureUrl ? (
-                                                <img src={p.profilePictureUrl} className="w-10 h-10 rounded-full border border-white/50" />
+                                                <img src={p.profilePictureUrl} className="w-8 h-8 md:w-10 md:h-10 rounded-full border border-white/50" />
                                             ) : (
-                                                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center border border-white/50 text-white font-bold">
+                                                <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-slate-700 flex items-center justify-center border border-white/50 text-white font-bold">
                                                     {p.nickname.charAt(0)}
                                                 </div>
                                             )}
                                             <span className="text-[10px] truncate w-full text-center mt-1 text-white">{p.nickname.slice(0,8)}</span>
                                         </>
                                     ) : (
-                                        <div className="w-10 h-10 rounded-full flex items-center justify-center opacity-30">
+                                        <div className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center opacity-30">
                                             <User size={20} />
                                         </div>
                                     )}
@@ -605,7 +615,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                         })}
                     </div>
 
-                    <div className="flex gap-2 justify-center">
+                    <div className="flex gap-2 justify-center w-full">
                          <button 
                             onClick={simulateJoin}
                             disabled={lobbyPlayers.length >= 8}
@@ -618,7 +628,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                             disabled={lobbyPlayers.length < 8}
                             className="px-8 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:opacity-50 text-white rounded-xl font-bold text-xl shadow-lg transition-all"
                         >
-                            MULAI TURNAMEN
+                            MULAI
                         </button>
                     </div>
                 </div>
@@ -628,132 +638,167 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         // Bracket View
         return (
             <div className="w-full flex flex-col items-center h-full">
-                {/* Visual Bracket 8 Players */}
-                <div className="flex justify-between items-center w-full max-w-5xl gap-2 mb-4 px-2 text-[10px] md:text-xs">
+                {/* Visual Bracket 8 Players - Responsive Design */}
+                <div className="flex justify-between items-center w-full max-w-5xl gap-1 md:gap-2 mb-2 px-1 text-[9px] md:text-xs overflow-x-auto min-w-0">
                     
                     {/* Left Column (QF 1 & 2) */}
-                    <div className="flex flex-col gap-8 w-1/5">
+                    <div className="flex flex-col gap-4 md:gap-8 w-1/5 min-w-[60px]">
                          {/* Match 0 */}
                         <div className={`p-1 rounded border ${activeMatchIndex === 0 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-1 truncate ${matches[0].winner?.uniqueId === matches[0].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p1?.nickname}</div>
+                            <div className={`p-0.5 truncate ${matches[0].winner?.uniqueId === matches[0].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p1?.nickname}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-1 truncate ${matches[0].winner?.uniqueId === matches[0].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p2?.nickname}</div>
+                            <div className={`p-0.5 truncate ${matches[0].winner?.uniqueId === matches[0].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p2?.nickname}</div>
                         </div>
                         {/* Match 1 */}
                         <div className={`p-1 rounded border ${activeMatchIndex === 1 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-1 truncate ${matches[1].winner?.uniqueId === matches[1].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p1?.nickname}</div>
+                            <div className={`p-0.5 truncate ${matches[1].winner?.uniqueId === matches[1].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p1?.nickname}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-1 truncate ${matches[1].winner?.uniqueId === matches[1].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p2?.nickname}</div>
+                            <div className={`p-0.5 truncate ${matches[1].winner?.uniqueId === matches[1].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p2?.nickname}</div>
                         </div>
                     </div>
 
                     {/* Left Semifinal (Match 4) */}
-                    <div className="flex flex-col justify-center w-1/5">
+                    <div className="flex flex-col justify-center w-1/5 min-w-[60px]">
                          <div className={`p-1 rounded border ${activeMatchIndex === 4 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-1 truncate ${matches[4].winner?.uniqueId === matches[4].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p1 ? matches[4].p1.nickname : '...'}</div>
+                            <div className={`p-0.5 truncate ${matches[4].winner?.uniqueId === matches[4].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p1 ? matches[4].p1.nickname : '...'}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-1 truncate ${matches[4].winner?.uniqueId === matches[4].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p2 ? matches[4].p2.nickname : '...'}</div>
+                            <div className={`p-0.5 truncate ${matches[4].winner?.uniqueId === matches[4].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p2 ? matches[4].p2.nickname : '...'}</div>
                         </div>
                     </div>
 
                     {/* Final (Match 6) & Center Arena */}
-                    <div className="flex flex-col items-center justify-center w-1/5 gap-2">
-                        <div className="text-yellow-400 font-bold text-lg">FINAL</div>
-                        <div className={`w-full p-2 rounded-lg border-2 text-center ${activeMatchIndex === 6 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-500 bg-slate-900'}`}>
+                    <div className="flex flex-col items-center justify-center w-1/5 min-w-[80px] gap-1 md:gap-2">
+                        <div className="text-yellow-400 font-bold text-[10px] md:text-lg">FINAL</div>
+                        <div className={`w-full p-1 md:p-2 rounded-lg border-2 text-center ${activeMatchIndex === 6 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-500 bg-slate-900'}`}>
                              <div className={`font-bold truncate ${matches[6].winner?.uniqueId === matches[6].p1?.uniqueId ? 'text-green-400' : ''}`}>
                                  {matches[6].p1 ? matches[6].p1.nickname : '...'}
                              </div>
-                             <div className="text-[10px] text-slate-500">vs</div>
+                             <div className="text-[9px] text-slate-500">vs</div>
                              <div className={`font-bold truncate ${matches[6].winner?.uniqueId === matches[6].p2?.uniqueId ? 'text-green-400' : ''}`}>
                                  {matches[6].p2 ? matches[6].p2.nickname : '...'}
                              </div>
                         </div>
                          {knockoutChampion && (
-                             <div className="animate-pop-in text-center mt-2">
-                                 <Crown size={32} className="text-yellow-400 mx-auto mb-1" />
-                                 <div className="text-yellow-300 font-black text-sm">{knockoutChampion.nickname}</div>
+                             <div className="animate-pop-in text-center mt-1">
+                                 <Crown size={24} className="text-yellow-400 mx-auto mb-1" />
+                                 <div className="text-yellow-300 font-black text-xs md:text-sm">{knockoutChampion.nickname}</div>
                              </div>
                          )}
                     </div>
 
                     {/* Right Semifinal (Match 5) */}
-                    <div className="flex flex-col justify-center w-1/5">
+                    <div className="flex flex-col justify-center w-1/5 min-w-[60px]">
                         <div className={`p-1 rounded border ${activeMatchIndex === 5 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-1 truncate ${matches[5].winner?.uniqueId === matches[5].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p1 ? matches[5].p1.nickname : '...'}</div>
+                            <div className={`p-0.5 truncate ${matches[5].winner?.uniqueId === matches[5].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p1 ? matches[5].p1.nickname : '...'}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-1 truncate ${matches[5].winner?.uniqueId === matches[5].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p2 ? matches[5].p2.nickname : '...'}</div>
+                            <div className={`p-0.5 truncate ${matches[5].winner?.uniqueId === matches[5].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p2 ? matches[5].p2.nickname : '...'}</div>
                         </div>
                     </div>
 
                     {/* Right Column (QF 3 & 4) */}
-                    <div className="flex flex-col gap-8 w-1/5">
+                    <div className="flex flex-col gap-4 md:gap-8 w-1/5 min-w-[60px]">
                          {/* Match 2 */}
                         <div className={`p-1 rounded border ${activeMatchIndex === 2 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-1 truncate ${matches[2].winner?.uniqueId === matches[2].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p1?.nickname}</div>
+                            <div className={`p-0.5 truncate ${matches[2].winner?.uniqueId === matches[2].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p1?.nickname}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-1 truncate ${matches[2].winner?.uniqueId === matches[2].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p2?.nickname}</div>
+                            <div className={`p-0.5 truncate ${matches[2].winner?.uniqueId === matches[2].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p2?.nickname}</div>
                         </div>
                         {/* Match 3 */}
                         <div className={`p-1 rounded border ${activeMatchIndex === 3 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-1 truncate ${matches[3].winner?.uniqueId === matches[3].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p1?.nickname}</div>
+                            <div className={`p-0.5 truncate ${matches[3].winner?.uniqueId === matches[3].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p1?.nickname}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-1 truncate ${matches[3].winner?.uniqueId === matches[3].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p2?.nickname}</div>
+                            <div className={`p-0.5 truncate ${matches[3].winner?.uniqueId === matches[3].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p2?.nickname}</div>
                         </div>
                     </div>
                 </div>
 
+                {/* Pre-Match Countdown Overlay */}
+                {knockoutPhase === 'BRACKET' && matchStartCountdown !== null && activeMatchIndex !== null && matches[activeMatchIndex] && (
+                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-sm animate-fade-in text-center p-6">
+                         <div className="text-purple-400 font-bold tracking-widest text-lg mb-2">
+                             {activeMatchIndex >= 6 ? 'BABAK FINAL' : (activeMatchIndex >= 4 ? 'SEMIFINAL' : `PEREMPAT FINAL ${activeMatchIndex + 1}`)}
+                         </div>
+                         <div className="flex items-center gap-4 md:gap-8 mb-8 scale-110">
+                            <div className="flex flex-col items-center animate-slide-up-entry">
+                                {matches[activeMatchIndex].p1?.profilePictureUrl ? (
+                                    <img src={matches[activeMatchIndex].p1?.profilePictureUrl} className="w-16 h-16 rounded-full border-2 border-indigo-500 mb-2 shadow-lg" />
+                                ) : (
+                                    <div className="w-16 h-16 rounded-full bg-slate-700 flex items-center justify-center border-2 border-indigo-500 mb-2 shadow-lg"><User size={32}/></div>
+                                )}
+                                <span className="font-bold text-xl">{matches[activeMatchIndex].p1?.nickname}</span>
+                            </div>
+                            <div className="text-3xl font-black text-rose-500 italic">VS</div>
+                            <div className="flex flex-col items-center animate-slide-up-entry" style={{animationDelay: '0.2s'}}>
+                                {matches[activeMatchIndex].p2?.profilePictureUrl ? (
+                                    <img src={matches[activeMatchIndex].p2?.profilePictureUrl} className="w-16 h-16 rounded-full border-2 border-indigo-500 mb-2 shadow-lg" />
+                                ) : (
+                                    <div className="w-16 h-16 rounded-full bg-slate-700 flex items-center justify-center border-2 border-indigo-500 mb-2 shadow-lg"><User size={32}/></div>
+                                )}
+                                <span className="font-bold text-xl">{matches[activeMatchIndex].p2?.nickname}</span>
+                            </div>
+                         </div>
+                         <div className="text-slate-400 text-sm mb-4">Mulai dalam</div>
+                         <div className="text-8xl font-black text-white">{matchStartCountdown}</div>
+                    </div>
+                )}
+
                 {/* Active Game Area (Only if playing) */}
-                {knockoutPhase === 'BRACKET' && activeMatchIndex !== null && matches[activeMatchIndex] && (
-                     <div className="w-full max-w-md bg-black/30 p-4 rounded-xl border border-white/10 text-center relative mt-auto mb-auto">
-                        <div className="text-xs uppercase tracking-widest text-purple-300 mb-2">
+                {knockoutPhase === 'BRACKET' && gameState === GameState.PLAYING && activeMatchIndex !== null && matches[activeMatchIndex] && (
+                     <div className="w-full max-w-md bg-black/30 p-3 rounded-xl border border-white/10 text-center relative mt-2 md:mt-auto mb-auto">
+                        <div className="text-[10px] md:text-xs uppercase tracking-widest text-purple-300 mb-2">
                             {activeMatchIndex >= 6 ? 'BABAK FINAL' : (activeMatchIndex >= 4 ? 'SEMIFINAL' : `PEREMPAT FINAL ${activeMatchIndex + 1}`)}
                         </div>
                         
                         {/* Player Turn Indicator */}
-                        <div className="flex items-center justify-center gap-4 mb-4 relative">
+                        <div className="flex items-center justify-center gap-2 md:gap-4 mb-2 md:mb-4 relative">
                              {/* Player 1 */}
-                             <div className={`text-right w-1/2 overflow-hidden transition-all duration-300 p-2 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
-                                 <div className="font-bold text-lg truncate">{matches[activeMatchIndex].p1?.nickname}</div>
+                             <div className={`text-right w-1/2 overflow-hidden transition-all duration-300 p-1 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
+                                 <div className="font-bold text-sm md:text-lg truncate">{matches[activeMatchIndex].p1?.nickname}</div>
                                  {currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId && (
-                                     <div className="text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
+                                     <div className="text-[9px] md:text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
                                  )}
                              </div>
                              
-                             <div className="text-sm font-mono text-slate-400 flex flex-col items-center">
+                             <div className="text-xs font-mono text-slate-400 flex flex-col items-center">
                                  <span>VS</span>
-                                 <ArrowRightLeft size={14} className="mt-1 opacity-50" />
+                                 <ArrowRightLeft size={12} className="mt-1 opacity-50" />
                              </div>
                              
                              {/* Player 2 */}
-                             <div className={`text-left w-1/2 overflow-hidden transition-all duration-300 p-2 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
-                                 <div className="font-bold text-lg truncate">{matches[activeMatchIndex].p2?.nickname}</div>
+                             <div className={`text-left w-1/2 overflow-hidden transition-all duration-300 p-1 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
+                                 <div className="font-bold text-sm md:text-lg truncate">{matches[activeMatchIndex].p2?.nickname}</div>
                                  {currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId && (
-                                     <div className="text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
+                                     <div className="text-[9px] md:text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
                                  )}
                              </div>
                         </div>
 
-                        {lastWord && <WordCard data={lastWord} isLatest={true} />}
+                        {lastWord && <div className="scale-90 md:scale-100"><WordCard data={lastWord} isLatest={true} /></div>}
                         
                         {requiredPrefix ? (
-                            <div className="text-4xl font-black text-white mt-4 tracking-widest animate-pulse">
+                            <div className="text-3xl md:text-4xl font-black text-white mt-2 tracking-widest animate-pulse">
                                 {requiredPrefix}...
                             </div>
                         ) : (
-                             <div className="text-xl text-slate-400 mt-4 animate-pulse">Menunggu AI...</div>
+                             <div className="text-lg md:text-xl text-slate-400 mt-2 animate-pulse">Menunggu AI...</div>
                         )}
 
-                        <div className="mt-4">
-                             <Timer timeLeft={timeLeft} totalTime={10} />
+                        <div className="mt-2">
+                             <Timer timeLeft={timeLeft} totalTime={30} />
                         </div>
-                        
-                        {/* Simulation Button */}
-                        <button 
-                            onClick={simulateCorrectAnswer} 
-                            className="absolute -top-10 right-0 text-[10px] bg-white/10 px-2 py-1 rounded hover:bg-white/20"
-                        >
-                            <PlayCircle size={12} className="inline mr-1"/> Simulasi Pemain Aktif
-                        </button>
+                     </div>
+                )}
+                
+                {/* Result Screen (Victory/Lose in Knockout) */}
+                {(gameState === GameState.VICTORY || gameState === GameState.GAME_OVER) && knockoutPhase === 'BRACKET' && (
+                     <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-md animate-fade-in p-6 text-center">
+                         <Trophy size={64} className="text-yellow-400 mb-4 animate-bounce" />
+                         <h2 className="text-3xl font-black text-white mb-2">{roastMessage}</h2>
+                         <p className="text-slate-300 mb-6">{gameOverReason}</p>
+                         <div className="flex items-center gap-2 text-indigo-400 text-sm">
+                            <Clock size={16} className="animate-spin" />
+                            <span>Menunggu pertandingan selanjutnya...</span>
+                         </div>
                      </div>
                 )}
 
@@ -839,7 +884,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                     ) : (
                                         <div className="w-full max-w-sm bg-black/40 backdrop-blur-sm border border-amber-500/30 rounded-xl p-2">
                                             <div className="flex items-center justify-between mb-2 pb-1 border-b border-white/10">
-                                                <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-widest"><Trophy size={14} /> Top Juara</div>
+                                                <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-widest"><Trophy size={14} /> Top 5 Leaderboard</div>
                                                 <span className="text-[10px] text-slate-400">Total Valid: {history.filter(h => h.player === 'chat').length}</span>
                                             </div>
                                             {leaderboard.map((player, idx) => (
@@ -869,7 +914,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                 </div>
                                 <div className="w-full text-center space-y-4">
                                     {requiredPrefix && <div className="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-emerald-400 drop-shadow-2xl">{requiredPrefix}...</div>}
-                                    <div className="w-full max-w-md mx-auto"><Timer timeLeft={timeLeft} totalTime={mode === GameMode.LIVE_VS_NETIZEN ? 20 : 15} /></div>
+                                    <div className="w-full max-w-md mx-auto"><Timer timeLeft={timeLeft} totalTime={30} /></div>
                                 </div>
                              </div>
                         ) : (
@@ -882,6 +927,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                             </div>
                         )
                     )}
+
+                    {/* MANUAL INPUT BAR IS REMOVED */}
                 </div>
 
                 {/* Right Panel: Live Feed */}

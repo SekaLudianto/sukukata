@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DictionaryEntry, GameSettings, GameState, TurnHistory, GameMode } from './types';
-import { getSyllableSuffix, findAIWord, validateUserWord } from './utils/gameLogic';
+import { getSyllableSuffix, findAIWord, validateUserWord, isValidDictionaryItem } from './utils/gameLogic';
 import { WordCard } from './components/WordCard';
 import { Timer } from './components/Timer';
 import { LiveGame } from './components/LiveGame';
@@ -82,12 +82,8 @@ const App: React.FC = () => {
                 return res.json();
             })
             .then((data: any[]) => {
-                // Simple validation
-                const validWords = data.filter((item: any) => 
-                    typeof item.word === 'string' && 
-                    item.word.length === 5 && 
-                    typeof item.arti === 'string'
-                );
+                // Filter words using robust validation (removes abbreviations like RAPBN)
+                const validWords = data.filter(isValidDictionaryItem);
                 
                 if (validWords.length > 0) {
                     setDictionary(validWords);

@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Upload, FileJson, AlertCircle } from 'lucide-react';
 import { DictionaryEntry } from '../types';
+import { isValidDictionaryItem } from '../utils/gameLogic';
 
 interface FileUploadProps {
     onLoaded: (data: DictionaryEntry[]) => void;
@@ -16,18 +17,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onLoaded }) => {
             if (!Array.isArray(json)) throw new Error("Format JSON harus berupa Array.");
             if (json.length === 0) throw new Error("File JSON kosong.");
             
-            // Check for 'word' and 'arti'
-            if (!json[0].word || !json[0].arti) throw new Error("Item harus punya 'word' & 'arti'.");
-            
-            // Filter only 5 letter words
-            const validWords = json.filter((item: any) => 
-                typeof item.word === 'string' && 
-                item.word.length === 5 && 
-                typeof item.arti === 'string'
-            );
+            // Filter only valid entries (correct format, 5 letters, and not abbreviations)
+            const validWords = json.filter(isValidDictionaryItem);
 
             if (validWords.length < 50) {
-                throw new Error(`Data valid (5 huruf) < 50 kata.`);
+                throw new Error(`Data valid (5 huruf & playable) < 50 kata. Pastikan format benar dan bukan singkatan.`);
             }
 
             onLoaded(validWords);
