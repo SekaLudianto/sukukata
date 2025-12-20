@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { DictionaryEntry, GameSettings, GameState, TurnHistory } from './types';
+import { DictionaryEntry, GameSettings, GameState, TurnHistory, GameMode } from './types';
 import { getSyllableSuffix, findAIWord, validateUserWord } from './utils/gameLogic';
 import { WordCard } from './components/WordCard';
 import { Timer } from './components/Timer';
 import { LiveGame } from './components/LiveGame';
-import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen } from 'lucide-react';
+import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen, Swords, Zap, Medal } from 'lucide-react';
 
 // --- Roasting Messages ---
 const ROASTS = {
@@ -54,7 +54,7 @@ const App: React.FC = () => {
     const [settings, setSettings] = useState<GameSettings>({ timerSeconds: 15, allowMockData: false });
     
     // Game Modes
-    const [isLiveMode, setIsLiveMode] = useState(false);
+    const [activeMode, setActiveMode] = useState<GameMode>(GameMode.SOLO);
 
     // Game Play State (Classic Mode)
     const [history, setHistory] = useState<TurnHistory[]>([]);
@@ -104,11 +104,11 @@ const App: React.FC = () => {
     // Timer Logic
     useEffect(() => {
         let interval: number;
-        if (gameState === GameState.PLAYING && timeLeft > 0 && !isLiveMode) {
+        if (gameState === GameState.PLAYING && timeLeft > 0 && activeMode === GameMode.SOLO) {
             interval = window.setInterval(() => {
                 setTimeLeft((prev) => prev - 1);
             }, 1000);
-        } else if (timeLeft === 0 && gameState === GameState.PLAYING && !isLiveMode) {
+        } else if (timeLeft === 0 && gameState === GameState.PLAYING && activeMode === GameMode.SOLO) {
             if (isAiTurn) {
                 endGame(GameState.VICTORY, "AI Kehabisan Waktu (Lagi error kali)!");
             } else {
@@ -116,11 +116,11 @@ const App: React.FC = () => {
             }
         }
         return () => clearInterval(interval);
-    }, [timeLeft, gameState, isAiTurn, isLiveMode]);
+    }, [timeLeft, gameState, isAiTurn, activeMode]);
 
     // AI Turn Logic
     useEffect(() => {
-        if (gameState === GameState.PLAYING && isAiTurn && !isLiveMode) {
+        if (gameState === GameState.PLAYING && isAiTurn && activeMode === GameMode.SOLO) {
             // Small delay to make it feel natural
             const thinkingTime = Math.random() * 1500 + 1000; 
             
@@ -138,14 +138,14 @@ const App: React.FC = () => {
             return () => clearTimeout(timerId);
         }
         // Focus input when user turn starts
-        if (gameState === GameState.PLAYING && !isAiTurn && !isLiveMode) {
+        if (gameState === GameState.PLAYING && !isAiTurn && activeMode === GameMode.SOLO) {
             setTimeout(() => {
                 inputRef.current?.focus();
                 // Ensure visibility on mobile
                 bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
             }, 100);
         }
-    }, [isAiTurn, gameState, requiredPrefix, isLiveMode]);
+    }, [isAiTurn, gameState, requiredPrefix, activeMode]);
 
 
     // --- Handlers ---
@@ -229,8 +229,8 @@ const App: React.FC = () => {
 
     // --- Render Helpers ---
 
-    if (isLiveMode) {
-        return <LiveGame dictionary={dictionary} onBack={() => setIsLiveMode(false)} />;
+    if (activeMode !== GameMode.SOLO) {
+        return <LiveGame mode={activeMode} dictionary={dictionary} onBack={() => setActiveMode(GameMode.SOLO)} />;
     }
 
     if (gameState === GameState.IDLE) {
@@ -300,23 +300,42 @@ const App: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="space-y-3">
                                 <button 
                                     onClick={startGame}
                                     disabled={dictionary.length === 0}
-                                    className="py-3 md:py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-base md:text-lg shadow-lg shadow-indigo-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
+                                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-base md:text-lg shadow-lg shadow-indigo-900/50 transition-all transform hover:scale-[1.01] flex items-center justify-center gap-2 active:scale-95"
                                 >
                                     <Play size={20} fill="currentColor" />
                                     Main Solo
                                 </button>
-                                <button 
-                                    onClick={() => setIsLiveMode(true)}
-                                    disabled={dictionary.length === 0}
-                                    className="py-3 md:py-4 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-base md:text-lg shadow-lg shadow-rose-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
-                                >
-                                    <Cast size={20} />
-                                    Mode Live
-                                </button>
+                                
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button 
+                                        onClick={() => setActiveMode(GameMode.LIVE_VS_AI)}
+                                        disabled={dictionary.length === 0}
+                                        className="py-4 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-rose-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
+                                    >
+                                        <Cast size={16} />
+                                        VS Netizen
+                                    </button>
+                                    <button 
+                                        onClick={() => setActiveMode(GameMode.LIVE_VS_NETIZEN)}
+                                        disabled={dictionary.length === 0}
+                                        className="py-4 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-amber-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
+                                    >
+                                        <Swords size={16} />
+                                        Battle Royale
+                                    </button>
+                                    <button 
+                                        onClick={() => setActiveMode(GameMode.LIVE_KNOCKOUT)}
+                                        disabled={dictionary.length === 0}
+                                        className="col-span-2 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-purple-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
+                                    >
+                                        <Medal size={16} />
+                                        Turnamen Knockout (4P)
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}

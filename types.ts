@@ -26,6 +26,20 @@ export enum GameState {
     VICTORY = 'VICTORY'
 }
 
+export enum GameMode {
+    SOLO = 'SOLO',
+    LIVE_VS_AI = 'LIVE_VS_AI',
+    LIVE_VS_NETIZEN = 'LIVE_VS_NETIZEN',
+    LIVE_KNOCKOUT = 'LIVE_KNOCKOUT'
+}
+
+export interface LeaderboardEntry {
+    uniqueId: string;
+    nickname: string;
+    profilePictureUrl?: string;
+    score: number;
+}
+
 // IndoFinity Types
 export interface TikTokUserData {
     uniqueId: string;
@@ -48,4 +62,19 @@ export interface LiveAttempt {
     isValid: boolean;
     reason?: string;
     timestamp: number;
+}
+
+// Knockout Types
+export interface KnockoutPlayer {
+    uniqueId: string;
+    nickname: string;
+    profilePictureUrl?: string;
+}
+
+export interface KnockoutMatch {
+    id: number;
+    p1: KnockoutPlayer | null;
+    p2: KnockoutPlayer | null;
+    winner: KnockoutPlayer | null;
+    nextMatchId: number | null; // ID of the match the winner goes to
 }
