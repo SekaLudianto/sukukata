@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DictionaryEntry, GameSettings, GameState, TurnHistory } from './types';
 import { getSyllableSuffix, findAIWord, validateUserWord } from './utils/gameLogic';
-import { FileUpload } from './components/FileUpload';
 import { WordCard } from './components/WordCard';
 import { Timer } from './components/Timer';
 import { LiveGame } from './components/LiveGame';
-import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home } from 'lucide-react';
+import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen } from 'lucide-react';
 
 // --- Roasting Messages ---
 const ROASTS = {
@@ -258,30 +257,31 @@ const App: React.FC = () => {
                     ) : (
                         <div className="space-y-4 md:space-y-6 animate-fade-in">
                             {dictionary.length > 0 ? (
-                                <div className="flex items-center justify-between bg-emerald-500/10 p-3 md:p-4 rounded-xl border border-emerald-500/20">
+                                <div className="flex items-center justify-center bg-emerald-500/10 p-3 md:p-4 rounded-xl border border-emerald-500/20">
                                     <div className="flex items-center gap-2">
                                         <div className="bg-emerald-500 rounded-full p-1">
                                             <CheckCircleIcon size={14} className="text-slate-900" />
                                         </div>
                                         <span className="text-emerald-200 text-xs md:text-sm font-medium">
-                                            {dictionary.length} Kata Siap
+                                            {dictionary.length} Kata Siap Dimainkan
                                         </span>
                                     </div>
-                                    <button 
-                                        onClick={() => setDictionary([])}
-                                        className="text-[10px] md:text-xs text-slate-400 hover:text-white underline"
-                                    >
-                                        Ganti JSON
-                                    </button>
                                 </div>
                             ) : (
-                                <div className="space-y-4">
-                                    <FileUpload onLoaded={(data) => {
-                                        setDictionary(data);
-                                    }} />
-                                    <div className="text-center text-xs text-slate-500">
-                                        *Butuh file dictionary.json
+                                <div className="space-y-4 text-center">
+                                    <div className="p-4 bg-rose-500/20 border border-rose-500/30 rounded-xl text-rose-200 flex flex-col items-center gap-2">
+                                        <AlertCircle size={24} />
+                                        <div>
+                                            <p className="font-bold">Gagal memuat kamus.</p>
+                                            <p className="text-xs mt-1 opacity-80">Pastikan file dictionary.json tersedia di public folder.</p>
+                                        </div>
                                     </div>
+                                     <button 
+                                        onClick={() => window.location.reload()}
+                                        className="text-xs text-indigo-400 hover:text-white underline"
+                                    >
+                                        Muat Ulang Halaman
+                                    </button>
                                 </div>
                             )}
 
