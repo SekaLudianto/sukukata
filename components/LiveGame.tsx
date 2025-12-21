@@ -3,30 +3,30 @@ import { DictionaryEntry, GameState, TurnHistory, LiveAttempt, GameMode, Leaderb
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock } from 'lucide-react';
+import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull } from 'lucide-react';
 import { io } from 'socket.io-client';
 
 // --- Varied Roasts for Live Game ---
 const LIVE_ROASTS = {
     win: [
-        "Netizen +62 emang gak ada lawan! AI langsung kena mental.",
-        "Gila! Kecepatan jempol kalian ngalahin prosesor AI.",
-        "AI: 'Ampun bang jago!' Netizen menang telak.",
-        "Definisi 'Kekuatan Rakyat' sesungguhnya. AI tak berkutik!",
-        "GGWP Netizen! AI butuh upgrade otak nih.",
-        "Kalian makan kamus ya? Pinter banget!",
-        "AI-nya mau resign aja liat jago-jagonya kalian.",
-        "Solid banget! Satu komando menghancurkan AI."
+        "Menyala Abangku! 🔥 AI-nya langsung kena mental breakdown.",
+        "Ras Terkuat di Bumi dilawan? AI pun sungkem. 🙇‍♂️",
+        "Definisi 'King Indo' sesungguhnya. AI cuma remah-remah rengginang.",
+        "GGWP! AI-nya auto uninstall diri sendiri karena malu. 🤣",
+        "Pasti adminnya curang nih, masa Netizen +62 sepintar ini? 🤔",
+        "Kelas banget! AI sampai bingung mau ngasih kata apa lagi. 🤯",
+        "Kalian makan kamus ya? Pinter banget! AI aja minder. 📚",
+        "Solid banget! Satu komando menghancurkan dominasi mesin. 🤖💥"
     ],
     lose: [
-        "Yah, Netizen kalah... AI-nya ketawa jahat nih.",
-        "Waduh, jempolnya pada kram ya? Kok kalah sama bot?",
-        "AI: 'Ez game, ez life'. Ayo coba lagi dong!",
-        "Malu dong sama kuota, masa kalah sama skrip komputer!",
-        "Kekompakan kalian belum cukup buat ngalahin algoritma.",
-        "Belajar lagi yuk! AI-nya ternyata lebih cerdas.",
-        "Jangan mau kalah! Masa dijajah teknologi?",
-        "Waktu habis! Kebanyakan mikir atau kebanyakan ngetik?"
+        "Yah elah! Jempol doang cepet, giliran mikir loading lama. 🐌",
+        "Malu sama kuota woy! Masa kalah sama bot hasil kodingan magang? 😭",
+        "Fix, ini pasti sinyalnya yang lemot, bukan otaknya kan? Ngaku! 🗿",
+        "Kaum mendang-mending minggir dulu, ini panggung buat yang berwawasan. 🤫",
+        "AI be like: 'Segitu doang kemampuan ras terkuat di bumi?' 🤣",
+        "Turu dek! Mending scroll TikTok daripada main ginian kalau kalah mulu. 😴",
+        "Skill issue. Perbanyak baca KBBI, kurangi baca komen julid. 📚",
+        "Waktu habis! Kebanyakan mikir apa kebanyakan ngetik typo? 😂"
     ]
 };
 
@@ -106,6 +106,37 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
             knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown
         };
     }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown]);
+
+    // --- Load Leaderboard from LocalStorage for Both Modes ---
+    useEffect(() => {
+        let storageKey = '';
+        if (mode === GameMode.LIVE_VS_NETIZEN) {
+            storageKey = 'sukukata_lb_battle';
+        } else if (mode === GameMode.LIVE_VS_AI) {
+            storageKey = 'sukukata_lb_coop';
+        }
+
+        if (storageKey) {
+            try {
+                const savedLb = localStorage.getItem(storageKey);
+                if (savedLb) {
+                    const parsed = JSON.parse(savedLb);
+                    if (Array.isArray(parsed)) {
+                        setLeaderboard(parsed);
+                    } else {
+                        setLeaderboard([]);
+                    }
+                } else {
+                    setLeaderboard([]);
+                }
+            } catch (e) {
+                console.error("Failed to load leaderboard", e);
+                setLeaderboard([]);
+            }
+        } else {
+            setLeaderboard([]); // Clear for Knockout/Solo
+        }
+    }, [mode]);
 
     // --- Logic: Knockout Tournament ---
     
@@ -299,17 +330,48 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
              if (currentMode === GameMode.LIVE_VS_AI) {
                 setChatScore(s => s + 1);
                 setIsAiTurn(true);
+                
+                // Track Individual Score for Co-op Mode too
+                if (winnerId && winnerName) {
+                    setLeaderboard(prev => {
+                        const existingIdx = prev.findIndex(p => p.uniqueId === winnerId);
+                        let newBoard = [...prev];
+                        
+                        if (existingIdx >= 0) {
+                            newBoard[existingIdx] = {
+                                ...newBoard[existingIdx],
+                                score: newBoard[existingIdx].score + 1,
+                                nickname: winnerName,
+                                profilePictureUrl: winnerProfilePic || newBoard[existingIdx].profilePictureUrl
+                            };
+                        } else {
+                            newBoard.push({
+                                uniqueId: winnerId,
+                                nickname: winnerName,
+                                profilePictureUrl: winnerProfilePic,
+                                score: 1
+                            });
+                        }
+                        
+                        newBoard.sort((a, b) => b.score - a.score);
+                        const top5 = newBoard.slice(0, 5);
+                        localStorage.setItem('sukukata_lb_coop', JSON.stringify(top5));
+                        return top5;
+                    });
+                }
+
              } else if (currentMode === GameMode.LIVE_VS_NETIZEN && winnerId && winnerName) {
-                // Battle Royale Leaderboard Logic
+                // Battle Royale Leaderboard Logic (Persistent)
                 setLeaderboard(prev => {
                     const existingIdx = prev.findIndex(p => p.uniqueId === winnerId);
                     let newBoard = [...prev];
+                    
                     if (existingIdx >= 0) {
                         newBoard[existingIdx] = {
                             ...newBoard[existingIdx],
                             score: newBoard[existingIdx].score + 1,
                             nickname: winnerName,
-                            profilePictureUrl: winnerProfilePic
+                            profilePictureUrl: winnerProfilePic || newBoard[existingIdx].profilePictureUrl
                         };
                     } else {
                         newBoard.push({
@@ -319,7 +381,17 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                             score: 1
                         });
                     }
-                    return newBoard.sort((a, b) => b.score - a.score).slice(0, 5);
+                    
+                    // Sort descending by score
+                    newBoard.sort((a, b) => b.score - a.score);
+                    
+                    // Keep only Top 5
+                    const top5 = newBoard.slice(0, 5);
+
+                    // Save to LocalStorage
+                    localStorage.setItem('sukukata_lb_battle', JSON.stringify(top5));
+                    
+                    return top5;
                 });
                 setIsAiTurn(false); 
              } else if (currentMode === GameMode.LIVE_KNOCKOUT && phase === 'BRACKET') {
@@ -378,6 +450,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                     if (event === 'chat' && eventData) {
                         const current = stateRef.current;
                         const { uniqueId, nickname, profilePictureUrl, comment } = eventData;
+                        // BYPASS FILTER: Hapus semua karakter non-huruf (termasuk spasi, titik, angka)
+                        // Contoh: "H O N O R" -> "HONOR"
                         const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z]/g, '').trim();
 
                         // --- MODE: LIVE KNOCKOUT LOGIC ---
@@ -534,7 +608,13 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
             setUsedWords(new Set());
             setAiScore(0);
             setChatScore(0);
-            setLeaderboard([]);
+            
+            // Only reset leaderboard if NOT battle royale (Battle Royale accumulates score)
+            // UPDATE: Also do not reset for LIVE_VS_AI so MVP can accumulate across rounds
+            if (mode !== GameMode.LIVE_VS_NETIZEN && mode !== GameMode.LIVE_VS_AI) {
+                setLeaderboard([]);
+            }
+            
             setLastWinner(null);
             setLiveAttempts([]);
             setRoastMessage('');
@@ -548,6 +628,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
 
     // --- SUB-COMPONENT: Knockout View ---
     const KnockoutView = () => {
+        // ... (existing code for knockout view)
         if (knockoutPhase === 'LOBBY') {
             return (
                 <div className="text-center space-y-6 relative w-full max-w-4xl mx-auto flex flex-col items-center">
@@ -877,23 +958,59 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                 {/* Score & Board for Non-Knockout */}
                                 <div className="absolute top-4 w-full px-4 flex justify-center z-20 pointer-events-none">
                                     {mode === GameMode.LIVE_VS_AI ? (
-                                        <div className="flex justify-between w-full max-w-2xl">
-                                            <div className="flex flex-col items-center"><span className="text-4xl font-black text-rose-400">{aiScore}</span><span className="text-xs font-bold bg-rose-500/20 px-2 py-0.5 rounded text-rose-200">AI BOT</span></div>
-                                            <div className="flex flex-col items-center"><span className="text-4xl font-black text-emerald-400">{chatScore}</span><span className="text-xs font-bold bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-200">NETIZEN</span></div>
+                                        <div className="w-full flex flex-col md:flex-row justify-between items-center md:items-start gap-2">
+                                            {/* AI vs Netizen Score */}
+                                            <div className="flex-1 w-full md:w-auto flex justify-between bg-black/40 backdrop-blur-sm border border-indigo-500/30 rounded-xl p-2 max-w-sm shadow-lg pointer-events-auto">
+                                                <div className="flex flex-col items-center">
+                                                    <span className="text-3xl md:text-4xl font-black text-rose-400">{aiScore}</span>
+                                                    <span className="text-[10px] md:text-xs font-bold bg-rose-500/20 px-2 py-0.5 rounded text-rose-200">AI BOT</span>
+                                                </div>
+                                                <div className="flex flex-col items-center">
+                                                    <span className="text-3xl md:text-4xl font-black text-emerald-400">{chatScore}</span>
+                                                    <span className="text-[10px] md:text-xs font-bold bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-200">NETIZEN</span>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* MVP Leaderboard for Co-op */}
+                                            <div className="w-full md:w-48 bg-black/40 backdrop-blur-sm border border-amber-500/30 rounded-xl p-2 pointer-events-auto">
+                                                 <div className="flex items-center justify-between mb-1 pb-1 border-b border-white/10">
+                                                    <div className="flex items-center gap-1 text-amber-400 font-bold text-[10px] uppercase tracking-widest"><Trophy size={10} /> Top 5 MVP</div>
+                                                </div>
+                                                {leaderboard.slice(0, 5).map((player, idx) => (
+                                                    <div key={player.uniqueId} className="flex items-center justify-between text-[10px] mb-1">
+                                                        <div className="flex items-center gap-1 overflow-hidden">
+                                                            <span className={`font-bold ${idx === 0 ? 'text-yellow-400' : 'text-gray-300'}`}>{idx + 1}</span> 
+                                                            <span className="truncate max-w-[80px] md:max-w-none">{player.nickname}</span>
+                                                        </div>
+                                                        <span className="font-bold text-amber-400">{player.score}</span>
+                                                    </div>
+                                                ))}
+                                                {leaderboard.length === 0 && <div className="text-[9px] text-slate-500 text-center italic py-1">Belum ada skor</div>}
+                                            </div>
                                         </div>
                                     ) : (
-                                        <div className="w-full max-w-sm bg-black/40 backdrop-blur-sm border border-amber-500/30 rounded-xl p-2">
-                                            <div className="flex items-center justify-between mb-2 pb-1 border-b border-white/10">
-                                                <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-widest"><Trophy size={14} /> Top 5 Leaderboard</div>
-                                                <span className="text-[10px] text-slate-400">Total Valid: {history.filter(h => h.player === 'chat').length}</span>
-                                            </div>
-                                            {leaderboard.map((player, idx) => (
-                                                <div key={player.uniqueId} className="flex items-center justify-between text-xs mb-1">
-                                                    <div className="flex items-center gap-2"><span className="font-bold text-amber-400">#{idx + 1}</span> <span>{player.nickname}</span></div>
-                                                    <span className="font-bold">{player.score}</span>
+                                        // Bug Fix: Only show Battle Royale leaderboard if NOT in Knockout Mode
+                                        mode === GameMode.LIVE_VS_NETIZEN && (
+                                            <div className="w-full max-w-sm bg-black/40 backdrop-blur-sm border border-amber-500/30 rounded-xl p-2 pointer-events-auto">
+                                                <div className="flex items-center justify-between mb-2 pb-1 border-b border-white/10">
+                                                    <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-widest"><Trophy size={14} /> Top 5 Leaderboard</div>
+                                                    <span className="text-[10px] text-slate-400">Total Valid: {history.filter(h => h.player === 'chat').length}</span>
                                                 </div>
-                                            ))}
-                                        </div>
+                                                {leaderboard.map((player, idx) => (
+                                                    <div key={player.uniqueId} className="flex items-center justify-between text-xs mb-1">
+                                                        <div className="flex items-center gap-2">
+                                                            {idx === 0 && <Crown size={12} className="text-yellow-400" />}
+                                                            <span className={`font-bold ${idx === 0 ? 'text-yellow-400' : (idx === 1 ? 'text-gray-300' : (idx === 2 ? 'text-amber-600' : 'text-amber-400'))}`}>#{idx + 1}</span> 
+                                                            <span className="truncate max-w-[100px]">{player.nickname}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-1">
+                                                            <Star size={10} className="text-yellow-400 fill-yellow-400" />
+                                                            <span className="font-bold">{player.score}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )
                                     )}
                                 </div>
                                 
@@ -920,7 +1037,11 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                         ) : (
                             <div className="text-center animate-pop-in glass p-8 rounded-3xl max-w-md mx-auto relative z-30">
                                 {/* Result Screen */}
-                                <Trophy size={80} className="text-yellow-400 animate-bounce mx-auto mb-4" />
+                                {gameState === GameState.VICTORY ? (
+                                     <Trophy size={80} className="text-yellow-400 animate-bounce mx-auto mb-4 drop-shadow-lg" />
+                                ) : (
+                                     <Skull size={80} className="text-rose-600 animate-pulse mx-auto mb-4 drop-shadow-[0_0_15px_rgba(225,29,72,0.5)]" />
+                                )}
                                 <h2 className="text-4xl font-black mb-4 uppercase">{mode === GameMode.LIVE_VS_NETIZEN ? 'RONDE SELESAI' : (gameState === GameState.VICTORY ? 'MENANG!' : 'KALAH')}</h2>
                                 <p className="text-white font-bold text-lg mb-1 italic">"{roastMessage}"</p>
                                 <button onClick={startGame} className="w-full py-4 mt-8 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold text-lg transition-colors shadow-lg">MAIN LAGI</button>
