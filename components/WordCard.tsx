@@ -1,6 +1,7 @@
 import React from 'react';
 import { TurnHistory } from '../types';
 import { BookOpen, User, Bot } from 'lucide-react';
+import { getSyllableSuffix } from '../utils/gameLogic';
 
 interface WordCardProps {
     data: TurnHistory;
@@ -9,6 +10,10 @@ interface WordCardProps {
 
 export const WordCard: React.FC<WordCardProps> = ({ data, isLatest }) => {
     const isAi = data.player === 'ai';
+    
+    // Calculate split for visual
+    const suffix = getSyllableSuffix(data.word);
+    const stem = data.word.substring(0, data.word.length - suffix.length);
 
     return (
         <div className={`
@@ -34,8 +39,9 @@ export const WordCard: React.FC<WordCardProps> = ({ data, isLatest }) => {
                 )}
             </div>
             
-            <div className="text-2xl md:text-3xl font-black tracking-widest mb-1 font-mono text-center">
-                {data.word}
+            <div className="text-2xl md:text-3xl font-black tracking-widest mb-1 font-mono text-center flex justify-center">
+                <span className="opacity-70">{stem}</span>
+                <span className={`${isAi ? 'text-rose-400' : 'text-emerald-400'} underline decoration-2 underline-offset-4`}>{suffix}</span>
             </div>
             
             <div className="flex items-start gap-1.5 text-xs opacity-90 italic border-t border-white/5 pt-2 mt-1">

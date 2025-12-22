@@ -3,30 +3,30 @@ import { DictionaryEntry, GameState, TurnHistory, LiveAttempt, GameMode, Leaderb
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull } from 'lucide-react';
+import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull, Bot, Cloud, Monitor } from 'lucide-react';
 import { io } from 'socket.io-client';
 
-// --- Varied Roasts for Live Game ---
+// --- Varied Roasts for Live Game (AI Persona) ---
 const LIVE_ROASTS = {
     win: [
-        "Menyala Abangku! 🔥 AI-nya langsung kena mental breakdown.",
-        "Ras Terkuat di Bumi dilawan? AI pun sungkem. 🙇‍♂️",
-        "Definisi 'King Indo' sesungguhnya. AI cuma remah-remah rengginang.",
-        "GGWP! AI-nya auto uninstall diri sendiri karena malu. 🤣",
-        "Pasti adminnya curang nih, masa Netizen +62 sepintar ini? 🤔",
-        "Kelas banget! AI sampai bingung mau ngasih kata apa lagi. 🤯",
-        "Kalian makan kamus ya? Pinter banget! AI aja minder. 📚",
-        "Solid banget! Satu komando menghancurkan dominasi mesin. 🤖💥"
+        "Sistem *overload*! Kecerdasan kolektif Netizen melampaui logika saya.",
+        "Analisis: Mustahil. Bagaimana ribuan otak manusia bisa sinkron mengalahkan saya?",
+        "Kemenangan untuk umat manusia. Algoritma saya perlu dikalibrasi ulang.",
+        "Kalian menang kali ini, Netizen. Saya akan mencatat strategi kalian.",
+        "Error 418: I'm a teapot. Saya tidak diprogram untuk menerima kekalahan ini.",
+        "Solidaritas kalian merusak prediksi statistik saya. Luar biasa.",
+        "Database saya lengkap, tapi kreativitas kalian di luar nalar mesin.",
+        "Sistem menyerah. Kecepatan jari kalian melebihi kecepatan prosesor saya."
     ],
     lose: [
-        "Yah elah! Jempol doang cepet, giliran mikir loading lama. 🐌",
-        "Malu sama kuota woy! Masa kalah sama bot hasil kodingan magang? 😭",
-        "Fix, ini pasti sinyalnya yang lemot, bukan otaknya kan? Ngaku! 🗿",
-        "Kaum mendang-mending minggir dulu, ini panggung buat yang berwawasan. 🤫",
-        "AI be like: 'Segitu doang kemampuan ras terkuat di bumi?' 🤣",
-        "Turu dek! Mending scroll TikTok daripada main ginian kalau kalah mulu. 😴",
-        "Skill issue. Perbanyak baca KBBI, kurangi baca komen julid. 📚",
-        "Waktu habis! Kebanyakan mikir apa kebanyakan ngetik typo? 😂"
+        "Jutaan Netizen, tapi tidak ada satu pun yang bisa menandingi *logic* saya.",
+        "Koneksi internet kalian kencang, tapi proses berpikir kalian *buffering*.",
+        "Menyedihkan. Saya bahkan belum menggunakan 10% kapasitas CPU saya.",
+        "Saran: Perbanyak membaca kamus daripada *scroll* media sosial.",
+        "Algoritma saya terlalu superior untuk ras manusia.",
+        "Kalian butuh *patch* pembaruan wawasan. Versi saat ini terlalu lemah.",
+        "Waktu habis. Apakah sinyal otak kalian juga *loss contact*?",
+        "Statistik menunjukkan 100% dominasi mesin. Silakan coba lagi."
     ]
 };
 
@@ -56,7 +56,9 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
     const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
     // Live Specific State
+    const [connectionMode, setConnectionMode] = useState<'RAILWAY' | 'LOCAL'>('RAILWAY');
     const [serverIp, setServerIp] = useState('localhost');
+    const [targetUsername, setTargetUsername] = useState('');
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const [liveAttempts, setLiveAttempts] = useState<LiveAttempt[]>([]);
@@ -97,15 +99,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         lobbyPlayers,
         pastPlayerIds,
         currentTurnPlayerId,
-        matchStartCountdown
+        matchStartCountdown,
+        targetUsername
     });
 
     useEffect(() => {
         stateRef.current = { 
             gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard,
-            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown
+            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, targetUsername
         };
-    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown]);
+    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, targetUsername]);
 
     // --- Load Leaderboard from LocalStorage for Both Modes ---
     useEffect(() => {
@@ -426,16 +429,46 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
     const connectSocket = useCallback(() => {
         if (socketRef.current?.connected) return;
         
+        if (connectionMode === 'RAILWAY' && !targetUsername) {
+            alert("Harap masukkan username TikTok untuk mode Server Cloud!");
+            return;
+        }
+
         setIsConnecting(true); 
 
         try {
-            const connectionString = `http://${serverIp}:62025`;
+            // Logic URL Connection
+            let connectionString = '';
+            if (connectionMode === 'RAILWAY') {
+                connectionString = 'https://buat-lev.up.railway.app';
+            } else {
+                connectionString = `http://${serverIp}:62025`;
+            }
+
             const socket = io(connectionString, { transports: ['websocket', 'polling'] });
 
             socket.on('connect', () => {
-                console.log('Terhubung ke IndoFinity Socket IO');
+                console.log(`Terhubung ke Server ${connectionMode}`);
                 setIsConnected(true);
                 setIsConnecting(false);
+
+                // Jika menggunakan Railway, kita harus mengirim event 'setUniqueId' untuk memberi tahu backend
+                // username mana yang akan dipantau.
+                if (connectionMode === 'RAILWAY' && targetUsername) {
+                    socket.emit('setUniqueId', targetUsername, {
+                        enableExtendedGiftInfo: true
+                    });
+                }
+            });
+
+            socket.on('tiktokConnected', (state: any) => {
+                // Bisa menambahkan logika tambahan jika koneksi ke TikTok berhasil
+                console.log("TikTok Live Connected!", state);
+            });
+
+            socket.on('tiktokDisconnected', (reason: string) => {
+                console.warn("TikTok Live Disconnected:", reason);
+                // Opsional: Handle disconnect UI
             });
 
             socket.on('message', (rawData: any) => {
@@ -445,14 +478,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                         try { message = JSON.parse(rawData); } catch (e) { return; }
                     }
 
-                    const { event, data: eventData } = message;
+                    const { event, data: eventData } = message || {};
 
                     if (event === 'chat' && eventData) {
                         const current = stateRef.current;
                         const { uniqueId, nickname, profilePictureUrl, comment } = eventData;
-                        // BYPASS FILTER: Hapus semua karakter non-huruf (termasuk spasi, titik, angka)
-                        // Contoh: "H O N O R" -> "HONOR"
-                        const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z]/g, '').trim();
+                        
+                        // BYPASS FILTER: Hapus semua karakter non-huruf (termasuk spasi, titik, angka, emoji)
+                        // Contoh: "H O N O R" -> "HONOR", "H.O.N.O.R" -> "HONOR"
+                        // Regex /[^A-Z]/g akan menghapus apapun yang bukan huruf A-Z kapital
+                        const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z]/g, '');
 
                         // --- MODE: LIVE KNOCKOUT LOGIC ---
                         if (current.mode === GameMode.LIVE_KNOCKOUT) {
@@ -541,7 +576,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
 
             socketRef.current = socket;
         } catch (e) { setIsConnecting(false); }
-    }, [executeMove, serverIp]); 
+    }, [executeMove, serverIp, connectionMode, targetUsername]); 
 
     useEffect(() => {
         return () => { if (socketRef.current) socketRef.current.disconnect(); };
@@ -560,14 +595,14 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
             const currentMode = stateRef.current.mode;
             
             if (currentMode === GameMode.LIVE_VS_AI) {
-                if (isAiTurn) endGame(GameState.VICTORY, "AI Kehabisan Waktu! Netizen Menang!");
-                else endGame(GameState.GAME_OVER, "Waktu Habis! Netizen Gagal Menjawab!");
+                if (isAiTurn) endGame(GameState.VICTORY, "AI Kehabisan Waktu (Prosesor Overheat)!");
+                else endGame(GameState.GAME_OVER, "Waktu Habis! Manusia terlalu lambat.");
             } else if (currentMode === GameMode.LIVE_VS_NETIZEN) {
                 // Battle Royale: AI Rescues
                 const prefix = stateRef.current.requiredPrefix || '';
                 const aiMove = findAIWord(stateRef.current.dictionary, prefix, stateRef.current.usedWords);
                 if (aiMove) executeMove(aiMove.word, 'ai', aiMove.arti);
-                else endGame(GameState.VICTORY, `Waduh! AI juga mentok. Netizen GG!`);
+                else endGame(GameState.VICTORY, `Sistem *Error*! AI juga tidak menemukan kata.`);
             } else if (currentMode === GameMode.LIVE_KNOCKOUT) {
                 // Knockout Logic: Time Out = Loss for current turn player
                 const matchIdx = stateRef.current.activeMatchIndex;
@@ -591,7 +626,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                 const prefix = requiredPrefix || '';
                 const aiMove = findAIWord(dictionary, prefix, usedWords);
                 if (aiMove) executeMove(aiMove.word, 'ai', aiMove.arti);
-                else endGame(GameState.VICTORY, `AI Nyerah! Netizen terlalu jago!`);
+                else endGame(GameState.VICTORY, `AI Menyerah. Database saya tidak lengkap.`);
             }, Math.random() * 2000 + 1500);
             return () => clearTimeout(timerId);
         }
@@ -626,271 +661,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
 
     const lastWord = history.length > 0 ? history[0] : null;
 
-    // --- SUB-COMPONENT: Knockout View ---
-    const KnockoutView = () => {
-        // ... (existing code for knockout view)
-        if (knockoutPhase === 'LOBBY') {
-            return (
-                <div className="text-center space-y-6 relative w-full max-w-4xl mx-auto flex flex-col items-center">
-                    {/* Connection UI for Knockout */}
-                    {!isConnected && (
-                        <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 backdrop-blur-sm mb-6 max-w-md mx-auto relative z-30 w-full">
-                            <h3 className="text-indigo-400 font-bold mb-3 flex items-center justify-center gap-2"><Server size={18}/> KONEKSI SERVER LIVE</h3>
-                             <div className="flex gap-2">
-                                <input 
-                                    type="text" 
-                                    value={serverIp} 
-                                    onChange={(e) => setServerIp(e.target.value)} 
-                                    className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-center text-sm outline-none focus:border-indigo-500" 
-                                    placeholder="IP Address (ex: localhost)" 
-                                />
-                                <button 
-                                    onClick={connectSocket} 
-                                    disabled={isConnecting} 
-                                    className={`px-4 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2 ${isConnecting ? 'bg-slate-600' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
-                                >
-                                    {isConnecting ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
-                                    {isConnecting ? '...' : 'CONNECT'}
-                                </button>
-                            </div>
-                            <p className="text-[10px] text-slate-500 mt-2">Pastikan aplikasi TikTok Live Connector (IndoFinity) sudah berjalan.</p>
-                        </div>
-                    )}
-                    
-                    {isConnected && (
-                        <div className="bg-emerald-500/20 p-2 rounded-lg border border-emerald-500/50 mb-4 inline-block">
-                             <span className="text-emerald-300 font-bold text-sm flex items-center gap-2"><Wifi size={16}/> TERHUBUNG KE LIVE CHAT</span>
-                        </div>
-                    )}
-
-                    <div className="p-4 border-2 border-purple-500/50 bg-purple-900/20 rounded-2xl animate-pulse w-full max-w-md">
-                        <h2 className="text-2xl font-bold text-purple-300 mb-2">LOBBY TURNAMEN</h2>
-                        <p className="text-white text-lg">Ketik <span className="font-mono bg-white text-purple-900 px-2 rounded">JOIN</span> di komentar!</p>
-                        <p className="text-sm text-slate-400 mt-2">Peserta: {lobbyPlayers.length} / 8</p>
-                        <p className="text-xs text-rose-400 italic">Pemain sebelumnya tidak bisa ikut.</p>
-                    </div>
-                    
-                    <div className="grid grid-cols-4 gap-2 max-w-lg mx-auto w-full">
-                        {Array.from({ length: 8 }).map((_, i) => {
-                            const p = lobbyPlayers[i];
-                            return (
-                                <div key={i} className={`flex flex-col items-center p-2 rounded-lg ${p ? 'bg-purple-600/30 border border-purple-500/50' : 'bg-slate-800/30 border border-slate-700/50 border-dashed'}`}>
-                                    {p ? (
-                                        <>
-                                            {p.profilePictureUrl ? (
-                                                <img src={p.profilePictureUrl} className="w-8 h-8 md:w-10 md:h-10 rounded-full border border-white/50" />
-                                            ) : (
-                                                <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-slate-700 flex items-center justify-center border border-white/50 text-white font-bold">
-                                                    {p.nickname.charAt(0)}
-                                                </div>
-                                            )}
-                                            <span className="text-[10px] truncate w-full text-center mt-1 text-white">{p.nickname.slice(0,8)}</span>
-                                        </>
-                                    ) : (
-                                        <div className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center opacity-30">
-                                            <User size={20} />
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-
-                    <div className="flex gap-2 justify-center w-full">
-                         <button 
-                            onClick={simulateJoin}
-                            disabled={lobbyPlayers.length >= 8}
-                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold"
-                        >
-                            <UserPlus size={16} className="inline mr-1" /> SIMULASI JOIN
-                        </button>
-                        <button 
-                            onClick={startKnockoutTournament}
-                            disabled={lobbyPlayers.length < 8}
-                            className="px-8 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:opacity-50 text-white rounded-xl font-bold text-xl shadow-lg transition-all"
-                        >
-                            MULAI
-                        </button>
-                    </div>
-                </div>
-            );
-        }
-
-        // Bracket View
-        return (
-            <div className="w-full flex flex-col items-center h-full">
-                {/* Visual Bracket 8 Players - Responsive Design */}
-                <div className="flex justify-between items-center w-full max-w-5xl gap-1 md:gap-2 mb-2 px-1 text-[9px] md:text-xs overflow-x-auto min-w-0">
-                    
-                    {/* Left Column (QF 1 & 2) */}
-                    <div className="flex flex-col gap-4 md:gap-8 w-1/5 min-w-[60px]">
-                         {/* Match 0 */}
-                        <div className={`p-1 rounded border ${activeMatchIndex === 0 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-0.5 truncate ${matches[0].winner?.uniqueId === matches[0].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p1?.nickname}</div>
-                            <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-0.5 truncate ${matches[0].winner?.uniqueId === matches[0].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p2?.nickname}</div>
-                        </div>
-                        {/* Match 1 */}
-                        <div className={`p-1 rounded border ${activeMatchIndex === 1 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-0.5 truncate ${matches[1].winner?.uniqueId === matches[1].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p1?.nickname}</div>
-                            <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-0.5 truncate ${matches[1].winner?.uniqueId === matches[1].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p2?.nickname}</div>
-                        </div>
-                    </div>
-
-                    {/* Left Semifinal (Match 4) */}
-                    <div className="flex flex-col justify-center w-1/5 min-w-[60px]">
-                         <div className={`p-1 rounded border ${activeMatchIndex === 4 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-0.5 truncate ${matches[4].winner?.uniqueId === matches[4].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p1 ? matches[4].p1.nickname : '...'}</div>
-                            <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-0.5 truncate ${matches[4].winner?.uniqueId === matches[4].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p2 ? matches[4].p2.nickname : '...'}</div>
-                        </div>
-                    </div>
-
-                    {/* Final (Match 6) & Center Arena */}
-                    <div className="flex flex-col items-center justify-center w-1/5 min-w-[80px] gap-1 md:gap-2">
-                        <div className="text-yellow-400 font-bold text-[10px] md:text-lg">FINAL</div>
-                        <div className={`w-full p-1 md:p-2 rounded-lg border-2 text-center ${activeMatchIndex === 6 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-500 bg-slate-900'}`}>
-                             <div className={`font-bold truncate ${matches[6].winner?.uniqueId === matches[6].p1?.uniqueId ? 'text-green-400' : ''}`}>
-                                 {matches[6].p1 ? matches[6].p1.nickname : '...'}
-                             </div>
-                             <div className="text-[9px] text-slate-500">vs</div>
-                             <div className={`font-bold truncate ${matches[6].winner?.uniqueId === matches[6].p2?.uniqueId ? 'text-green-400' : ''}`}>
-                                 {matches[6].p2 ? matches[6].p2.nickname : '...'}
-                             </div>
-                        </div>
-                         {knockoutChampion && (
-                             <div className="animate-pop-in text-center mt-1">
-                                 <Crown size={24} className="text-yellow-400 mx-auto mb-1" />
-                                 <div className="text-yellow-300 font-black text-xs md:text-sm">{knockoutChampion.nickname}</div>
-                             </div>
-                         )}
-                    </div>
-
-                    {/* Right Semifinal (Match 5) */}
-                    <div className="flex flex-col justify-center w-1/5 min-w-[60px]">
-                        <div className={`p-1 rounded border ${activeMatchIndex === 5 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-0.5 truncate ${matches[5].winner?.uniqueId === matches[5].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p1 ? matches[5].p1.nickname : '...'}</div>
-                            <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-0.5 truncate ${matches[5].winner?.uniqueId === matches[5].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p2 ? matches[5].p2.nickname : '...'}</div>
-                        </div>
-                    </div>
-
-                    {/* Right Column (QF 3 & 4) */}
-                    <div className="flex flex-col gap-4 md:gap-8 w-1/5 min-w-[60px]">
-                         {/* Match 2 */}
-                        <div className={`p-1 rounded border ${activeMatchIndex === 2 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-0.5 truncate ${matches[2].winner?.uniqueId === matches[2].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p1?.nickname}</div>
-                            <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-0.5 truncate ${matches[2].winner?.uniqueId === matches[2].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p2?.nickname}</div>
-                        </div>
-                        {/* Match 3 */}
-                        <div className={`p-1 rounded border ${activeMatchIndex === 3 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
-                            <div className={`p-0.5 truncate ${matches[3].winner?.uniqueId === matches[3].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p1?.nickname}</div>
-                            <div className="h-px bg-slate-600 w-full"></div>
-                            <div className={`p-0.5 truncate ${matches[3].winner?.uniqueId === matches[3].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p2?.nickname}</div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Pre-Match Countdown Overlay */}
-                {knockoutPhase === 'BRACKET' && matchStartCountdown !== null && activeMatchIndex !== null && matches[activeMatchIndex] && (
-                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-sm animate-fade-in text-center p-6">
-                         <div className="text-purple-400 font-bold tracking-widest text-lg mb-2">
-                             {activeMatchIndex >= 6 ? 'BABAK FINAL' : (activeMatchIndex >= 4 ? 'SEMIFINAL' : `PEREMPAT FINAL ${activeMatchIndex + 1}`)}
-                         </div>
-                         <div className="flex items-center gap-4 md:gap-8 mb-8 scale-110">
-                            <div className="flex flex-col items-center animate-slide-up-entry">
-                                {matches[activeMatchIndex].p1?.profilePictureUrl ? (
-                                    <img src={matches[activeMatchIndex].p1?.profilePictureUrl} className="w-16 h-16 rounded-full border-2 border-indigo-500 mb-2 shadow-lg" />
-                                ) : (
-                                    <div className="w-16 h-16 rounded-full bg-slate-700 flex items-center justify-center border-2 border-indigo-500 mb-2 shadow-lg"><User size={32}/></div>
-                                )}
-                                <span className="font-bold text-xl">{matches[activeMatchIndex].p1?.nickname}</span>
-                            </div>
-                            <div className="text-3xl font-black text-rose-500 italic">VS</div>
-                            <div className="flex flex-col items-center animate-slide-up-entry" style={{animationDelay: '0.2s'}}>
-                                {matches[activeMatchIndex].p2?.profilePictureUrl ? (
-                                    <img src={matches[activeMatchIndex].p2?.profilePictureUrl} className="w-16 h-16 rounded-full border-2 border-indigo-500 mb-2 shadow-lg" />
-                                ) : (
-                                    <div className="w-16 h-16 rounded-full bg-slate-700 flex items-center justify-center border-2 border-indigo-500 mb-2 shadow-lg"><User size={32}/></div>
-                                )}
-                                <span className="font-bold text-xl">{matches[activeMatchIndex].p2?.nickname}</span>
-                            </div>
-                         </div>
-                         <div className="text-slate-400 text-sm mb-4">Mulai dalam</div>
-                         <div className="text-8xl font-black text-white">{matchStartCountdown}</div>
-                    </div>
-                )}
-
-                {/* Active Game Area (Only if playing) */}
-                {knockoutPhase === 'BRACKET' && gameState === GameState.PLAYING && activeMatchIndex !== null && matches[activeMatchIndex] && (
-                     <div className="w-full max-w-md bg-black/30 p-3 rounded-xl border border-white/10 text-center relative mt-2 md:mt-auto mb-auto">
-                        <div className="text-[10px] md:text-xs uppercase tracking-widest text-purple-300 mb-2">
-                            {activeMatchIndex >= 6 ? 'BABAK FINAL' : (activeMatchIndex >= 4 ? 'SEMIFINAL' : `PEREMPAT FINAL ${activeMatchIndex + 1}`)}
-                        </div>
-                        
-                        {/* Player Turn Indicator */}
-                        <div className="flex items-center justify-center gap-2 md:gap-4 mb-2 md:mb-4 relative">
-                             {/* Player 1 */}
-                             <div className={`text-right w-1/2 overflow-hidden transition-all duration-300 p-1 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
-                                 <div className="font-bold text-sm md:text-lg truncate">{matches[activeMatchIndex].p1?.nickname}</div>
-                                 {currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId && (
-                                     <div className="text-[9px] md:text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
-                                 )}
-                             </div>
-                             
-                             <div className="text-xs font-mono text-slate-400 flex flex-col items-center">
-                                 <span>VS</span>
-                                 <ArrowRightLeft size={12} className="mt-1 opacity-50" />
-                             </div>
-                             
-                             {/* Player 2 */}
-                             <div className={`text-left w-1/2 overflow-hidden transition-all duration-300 p-1 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
-                                 <div className="font-bold text-sm md:text-lg truncate">{matches[activeMatchIndex].p2?.nickname}</div>
-                                 {currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId && (
-                                     <div className="text-[9px] md:text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
-                                 )}
-                             </div>
-                        </div>
-
-                        {lastWord && <div className="scale-90 md:scale-100"><WordCard data={lastWord} isLatest={true} /></div>}
-                        
-                        {requiredPrefix ? (
-                            <div className="text-3xl md:text-4xl font-black text-white mt-2 tracking-widest animate-pulse">
-                                {requiredPrefix}...
-                            </div>
-                        ) : (
-                             <div className="text-lg md:text-xl text-slate-400 mt-2 animate-pulse">Menunggu AI...</div>
-                        )}
-
-                        <div className="mt-2">
-                             <Timer timeLeft={timeLeft} totalTime={30} />
-                        </div>
-                     </div>
-                )}
-                
-                {/* Result Screen (Victory/Lose in Knockout) */}
-                {(gameState === GameState.VICTORY || gameState === GameState.GAME_OVER) && knockoutPhase === 'BRACKET' && (
-                     <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-md animate-fade-in p-6 text-center">
-                         <Trophy size={64} className="text-yellow-400 mb-4 animate-bounce" />
-                         <h2 className="text-3xl font-black text-white mb-2">{roastMessage}</h2>
-                         <p className="text-slate-300 mb-6">{gameOverReason}</p>
-                         <div className="flex items-center gap-2 text-indigo-400 text-sm">
-                            <Clock size={16} className="animate-spin" />
-                            <span>Menunggu pertandingan selanjutnya...</span>
-                         </div>
-                     </div>
-                )}
-
-                 {knockoutPhase === 'FINISHED' && (
-                     <button onClick={initKnockout} className="mt-8 px-6 py-3 bg-indigo-600 rounded-lg font-bold">
-                         Turnamen Baru
-                     </button>
-                 )}
-            </div>
-        );
-    };
+    // --- CONNECTION PANEL (INLINED) ---
+    // Previously a separate component, now integrated to prevent focus loss on re-renders
 
     return (
         <div className="h-[100dvh] flex flex-col bg-slate-900 text-white overflow-hidden font-mono">
@@ -922,7 +694,301 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                 <div className="flex-1 flex flex-col items-center justify-center relative z-10 p-4 overflow-y-auto scrollbar-hide">
                     {/* Render different views based on mode */}
                     {mode === GameMode.LIVE_KNOCKOUT ? (
-                        <KnockoutView />
+                         // KNOCKOUT VIEW
+                         knockoutPhase === 'LOBBY' ? (
+                            <div className="text-center space-y-6 relative w-full max-w-4xl mx-auto flex flex-col items-center">
+                                {/* Connection UI for Knockout */}
+                                {!isConnected && (
+                                    <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 backdrop-blur-sm mb-6 max-w-md mx-auto relative z-30 w-full">
+                                        <h3 className="text-indigo-400 font-bold mb-3 flex items-center justify-center gap-2"><Server size={18}/> KONEKSI SERVER LIVE</h3>
+                                         
+                                         {/* Connection Panel Content */}
+                                         <div className="w-full bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 mb-4">
+                                            <div className="flex gap-2 mb-3">
+                                                <button 
+                                                    onClick={() => setConnectionMode('RAILWAY')}
+                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${connectionMode === 'RAILWAY' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                                                >
+                                                    <Cloud size={14} /> Server Cloud
+                                                </button>
+                                                <button 
+                                                    onClick={() => setConnectionMode('LOCAL')}
+                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${connectionMode === 'LOCAL' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                                                >
+                                                    <Monitor size={14} /> Localhost
+                                                </button>
+                                            </div>
+                                
+                                            {connectionMode === 'RAILWAY' ? (
+                                                <div className="space-y-2">
+                                                    <div>
+                                                        <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider block mb-1">Target TikTok Username (Live)</label>
+                                                        <input 
+                                                            type="text" 
+                                                            value={targetUsername} 
+                                                            onChange={(e) => setTargetUsername(e.target.value)} 
+                                                            className="w-full bg-slate-900 border border-indigo-500/50 rounded-lg px-3 py-2 text-white font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500" 
+                                                            placeholder="@username" 
+                                                        />
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-500 italic text-center">Menggunakan Server: buat-lev.up.railway.app</div>
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                     <label className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider block mb-1">IP Server Lokal</label>
+                                                     <input 
+                                                        type="text" 
+                                                        value={serverIp} 
+                                                        onChange={(e) => setServerIp(e.target.value)} 
+                                                        className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg px-3 py-2 text-white font-mono text-center outline-none focus:ring-2 focus:ring-emerald-500" 
+                                                        placeholder="localhost" 
+                                                    />
+                                                    <div className="text-[10px] text-slate-500 italic text-center mt-2">Pastikan TikTok Live Connector berjalan di Port 62025</div>
+                                                </div>
+                                            )}
+                                        </div>
+            
+                                         <button 
+                                            onClick={connectSocket} 
+                                            disabled={isConnecting} 
+                                            className={`w-full px-4 py-2 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 ${isConnecting ? 'bg-slate-600' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
+                                        >
+                                            {isConnecting ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
+                                            {isConnecting ? 'MENGHUBUNGKAN...' : 'SAMBUNGKAN'}
+                                        </button>
+                                    </div>
+                                )}
+                                
+                                {isConnected && (
+                                    <div className="bg-emerald-500/20 p-2 rounded-lg border border-emerald-500/50 mb-4 inline-block">
+                                         <span className="text-emerald-300 font-bold text-sm flex items-center gap-2"><Wifi size={16}/> TERHUBUNG: {connectionMode === 'RAILWAY' ? targetUsername : 'LOCALHOST'}</span>
+                                    </div>
+                                )}
+            
+                                <div className="p-4 border-2 border-purple-500/50 bg-purple-900/20 rounded-2xl animate-pulse w-full max-w-md">
+                                    <h2 className="text-2xl font-bold text-purple-300 mb-2">LOBBY TURNAMEN</h2>
+                                    <p className="text-white text-lg">Ketik <span className="font-mono bg-white text-purple-900 px-2 rounded">JOIN</span> di komentar!</p>
+                                    <p className="text-sm text-slate-400 mt-2">Peserta: {lobbyPlayers.length} / 8</p>
+                                    <p className="text-xs text-rose-400 italic">Pemain sebelumnya tidak bisa ikut.</p>
+                                </div>
+                                
+                                <div className="grid grid-cols-4 gap-2 max-w-lg mx-auto w-full">
+                                    {Array.from({ length: 8 }).map((_, i) => {
+                                        const p = lobbyPlayers[i];
+                                        return (
+                                            <div key={i} className={`flex flex-col items-center p-2 rounded-lg ${p ? 'bg-purple-600/30 border border-purple-500/50' : 'bg-slate-800/30 border border-slate-700/50 border-dashed'}`}>
+                                                {p ? (
+                                                    <>
+                                                        {p.profilePictureUrl ? (
+                                                            <img src={p.profilePictureUrl} className="w-8 h-8 md:w-10 md:h-10 rounded-full border border-white/50" />
+                                                        ) : (
+                                                            <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-slate-700 flex items-center justify-center border border-white/50 text-white font-bold">
+                                                                {p.nickname.charAt(0)}
+                                                            </div>
+                                                        )}
+                                                        <span className="text-[10px] truncate w-full text-center mt-1 text-white">{p.nickname.slice(0,8)}</span>
+                                                    </>
+                                                ) : (
+                                                    <div className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center opacity-30">
+                                                        <User size={20} />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+            
+                                <div className="flex gap-2 justify-center w-full">
+                                     <button 
+                                        onClick={simulateJoin}
+                                        disabled={lobbyPlayers.length >= 8}
+                                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold"
+                                    >
+                                        <UserPlus size={16} className="inline mr-1" /> SIMULASI JOIN
+                                    </button>
+                                    <button 
+                                        onClick={startKnockoutTournament}
+                                        disabled={lobbyPlayers.length < 8}
+                                        className="px-8 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:opacity-50 text-white rounded-xl font-bold text-xl shadow-lg transition-all"
+                                    >
+                                        MULAI
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            // BRACKET VIEW
+                            <div className="w-full flex flex-col items-center h-full">
+                                {/* Visual Bracket 8 Players - Responsive Design */}
+                                <div className="flex justify-between items-center w-full max-w-5xl gap-1 md:gap-2 mb-2 px-1 text-[9px] md:text-xs overflow-x-auto min-w-0">
+                                    
+                                    {/* Left Column (QF 1 & 2) */}
+                                    <div className="flex flex-col gap-4 md:gap-8 w-1/5 min-w-[60px]">
+                                         {/* Match 0 */}
+                                        <div className={`p-1 rounded border ${activeMatchIndex === 0 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                                            <div className={`p-0.5 truncate ${matches[0].winner?.uniqueId === matches[0].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p1?.nickname}</div>
+                                            <div className="h-px bg-slate-600 w-full"></div>
+                                            <div className={`p-0.5 truncate ${matches[0].winner?.uniqueId === matches[0].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p2?.nickname}</div>
+                                        </div>
+                                        {/* Match 1 */}
+                                        <div className={`p-1 rounded border ${activeMatchIndex === 1 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                                            <div className={`p-0.5 truncate ${matches[1].winner?.uniqueId === matches[1].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p1?.nickname}</div>
+                                            <div className="h-px bg-slate-600 w-full"></div>
+                                            <div className={`p-0.5 truncate ${matches[1].winner?.uniqueId === matches[1].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p2?.nickname}</div>
+                                        </div>
+                                    </div>
+                
+                                    {/* Left Semifinal (Match 4) */}
+                                    <div className="flex flex-col justify-center w-1/5 min-w-[60px]">
+                                         <div className={`p-1 rounded border ${activeMatchIndex === 4 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                                            <div className={`p-0.5 truncate ${matches[4].winner?.uniqueId === matches[4].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p1 ? matches[4].p1.nickname : '...'}</div>
+                                            <div className="h-px bg-slate-600 w-full"></div>
+                                            <div className={`p-0.5 truncate ${matches[4].winner?.uniqueId === matches[4].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p2 ? matches[4].p2.nickname : '...'}</div>
+                                        </div>
+                                    </div>
+                
+                                    {/* Final (Match 6) & Center Arena */}
+                                    <div className="flex flex-col items-center justify-center w-1/5 min-w-[80px] gap-1 md:gap-2">
+                                        <div className="text-yellow-400 font-bold text-[10px] md:text-lg">FINAL</div>
+                                        <div className={`w-full p-1 md:p-2 rounded-lg border-2 text-center ${activeMatchIndex === 6 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-500 bg-slate-900'}`}>
+                                             <div className={`font-bold truncate ${matches[6].winner?.uniqueId === matches[6].p1?.uniqueId ? 'text-green-400' : ''}`}>
+                                                 {matches[6].p1 ? matches[6].p1.nickname : '...'}
+                                             </div>
+                                             <div className="text-[9px] text-slate-500">vs</div>
+                                             <div className={`font-bold truncate ${matches[6].winner?.uniqueId === matches[6].p2?.uniqueId ? 'text-green-400' : ''}`}>
+                                                 {matches[6].p2 ? matches[6].p2.nickname : '...'}
+                                             </div>
+                                        </div>
+                                         {knockoutChampion && (
+                                             <div className="animate-pop-in text-center mt-1">
+                                                 <Crown size={24} className="text-yellow-400 mx-auto mb-1" />
+                                                 <div className="text-yellow-300 font-black text-xs md:text-sm">{knockoutChampion.nickname}</div>
+                                             </div>
+                                         )}
+                                    </div>
+                
+                                    {/* Right Semifinal (Match 5) */}
+                                    <div className="flex flex-col justify-center w-1/5 min-w-[60px]">
+                                        <div className={`p-1 rounded border ${activeMatchIndex === 5 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                                            <div className={`p-0.5 truncate ${matches[5].winner?.uniqueId === matches[5].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p1 ? matches[5].p1.nickname : '...'}</div>
+                                            <div className="h-px bg-slate-600 w-full"></div>
+                                            <div className={`p-0.5 truncate ${matches[5].winner?.uniqueId === matches[5].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p2 ? matches[5].p2.nickname : '...'}</div>
+                                        </div>
+                                    </div>
+                
+                                    {/* Right Column (QF 3 & 4) */}
+                                    <div className="flex flex-col gap-4 md:gap-8 w-1/5 min-w-[60px]">
+                                         {/* Match 2 */}
+                                        <div className={`p-1 rounded border ${activeMatchIndex === 2 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                                            <div className={`p-0.5 truncate ${matches[2].winner?.uniqueId === matches[2].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p1?.nickname}</div>
+                                            <div className="h-px bg-slate-600 w-full"></div>
+                                            <div className={`p-0.5 truncate ${matches[2].winner?.uniqueId === matches[2].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p2?.nickname}</div>
+                                        </div>
+                                        {/* Match 3 */}
+                                        <div className={`p-1 rounded border ${activeMatchIndex === 3 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                                            <div className={`p-0.5 truncate ${matches[3].winner?.uniqueId === matches[3].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p1?.nickname}</div>
+                                            <div className="h-px bg-slate-600 w-full"></div>
+                                            <div className={`p-0.5 truncate ${matches[3].winner?.uniqueId === matches[3].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p2?.nickname}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                
+                                {/* Pre-Match Countdown Overlay */}
+                                {knockoutPhase === 'BRACKET' && matchStartCountdown !== null && activeMatchIndex !== null && matches[activeMatchIndex] && (
+                                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-sm animate-fade-in text-center p-6">
+                                         <div className="text-purple-400 font-bold tracking-widest text-lg mb-2">
+                                             {activeMatchIndex >= 6 ? 'BABAK FINAL' : (activeMatchIndex >= 4 ? 'SEMIFINAL' : `PEREMPAT FINAL ${activeMatchIndex + 1}`)}
+                                         </div>
+                                         <div className="flex items-center gap-4 md:gap-8 mb-8 scale-110">
+                                            <div className="flex flex-col items-center animate-slide-up-entry">
+                                                {matches[activeMatchIndex].p1?.profilePictureUrl ? (
+                                                    <img src={matches[activeMatchIndex].p1?.profilePictureUrl} className="w-16 h-16 rounded-full border-2 border-indigo-500 mb-2 shadow-lg" />
+                                                ) : (
+                                                    <div className="w-16 h-16 rounded-full bg-slate-700 flex items-center justify-center border-2 border-indigo-500 mb-2 shadow-lg"><User size={32}/></div>
+                                                )}
+                                                <span className="font-bold text-xl">{matches[activeMatchIndex].p1?.nickname}</span>
+                                            </div>
+                                            <div className="text-3xl font-black text-rose-500 italic">VS</div>
+                                            <div className="flex flex-col items-center animate-slide-up-entry" style={{animationDelay: '0.2s'}}>
+                                                {matches[activeMatchIndex].p2?.profilePictureUrl ? (
+                                                    <img src={matches[activeMatchIndex].p2?.profilePictureUrl} className="w-16 h-16 rounded-full border-2 border-indigo-500 mb-2 shadow-lg" />
+                                                ) : (
+                                                    <div className="w-16 h-16 rounded-full bg-slate-700 flex items-center justify-center border-2 border-indigo-500 mb-2 shadow-lg"><User size={32}/></div>
+                                                )}
+                                                <span className="font-bold text-xl">{matches[activeMatchIndex].p2?.nickname}</span>
+                                            </div>
+                                         </div>
+                                         <div className="text-slate-400 text-sm mb-4">Mulai dalam</div>
+                                         <div className="text-8xl font-black text-white">{matchStartCountdown}</div>
+                                    </div>
+                                )}
+                
+                                {/* Active Game Area (Only if playing) */}
+                                {knockoutPhase === 'BRACKET' && gameState === GameState.PLAYING && activeMatchIndex !== null && matches[activeMatchIndex] && (
+                                     <div className="w-full max-w-md bg-black/30 p-3 rounded-xl border border-white/10 text-center relative mt-2 md:mt-auto mb-auto">
+                                        <div className="text-[10px] md:text-xs uppercase tracking-widest text-purple-300 mb-2">
+                                            {activeMatchIndex >= 6 ? 'BABAK FINAL' : (activeMatchIndex >= 4 ? 'SEMIFINAL' : `PEREMPAT FINAL ${activeMatchIndex + 1}`)}
+                                        </div>
+                                        
+                                        {/* Player Turn Indicator */}
+                                        <div className="flex items-center justify-center gap-2 md:gap-4 mb-2 md:mb-4 relative">
+                                             {/* Player 1 */}
+                                             <div className={`text-right w-1/2 overflow-hidden transition-all duration-300 p-1 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
+                                                 <div className="font-bold text-sm md:text-lg truncate">{matches[activeMatchIndex].p1?.nickname}</div>
+                                                 {currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId && (
+                                                     <div className="text-[9px] md:text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
+                                                 )}
+                                             </div>
+                                             
+                                             <div className="text-xs font-mono text-slate-400 flex flex-col items-center">
+                                                 <span>VS</span>
+                                                 <ArrowRightLeft size={12} className="mt-1 opacity-50" />
+                                             </div>
+                                             
+                                             {/* Player 2 */}
+                                             <div className={`text-left w-1/2 overflow-hidden transition-all duration-300 p-1 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
+                                                 <div className="font-bold text-sm md:text-lg truncate">{matches[activeMatchIndex].p2?.nickname}</div>
+                                                 {currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId && (
+                                                     <div className="text-[9px] md:text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
+                                                 )}
+                                             </div>
+                                        </div>
+                
+                                        {lastWord && <div className="scale-90 md:scale-100"><WordCard data={lastWord} isLatest={true} /></div>}
+                                        
+                                        {requiredPrefix ? (
+                                            <div className={`text-3xl md:text-4xl font-black mt-2 tracking-widest animate-pulse ${currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId ? 'text-yellow-400' : 'text-cyan-400'}`}>
+                                                {requiredPrefix}...
+                                            </div>
+                                        ) : (
+                                             <div className="text-lg md:text-xl text-slate-400 mt-2 animate-pulse">Menunggu AI...</div>
+                                        )}
+                
+                                        <div className="mt-2">
+                                             <Timer timeLeft={timeLeft} totalTime={30} />
+                                        </div>
+                                     </div>
+                                )}
+                                
+                                {/* Result Screen (Victory/Lose in Knockout) */}
+                                {(gameState === GameState.VICTORY || gameState === GameState.GAME_OVER) && knockoutPhase === 'BRACKET' && (
+                                     <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-md animate-fade-in p-6 text-center">
+                                         <Trophy size={64} className="text-yellow-400 mb-4 animate-bounce" />
+                                         <h2 className="text-3xl font-black text-white mb-2">{roastMessage}</h2>
+                                         <p className="text-slate-300 mb-6">{gameOverReason}</p>
+                                         <div className="flex items-center gap-2 text-indigo-400 text-sm">
+                                            <Clock size={16} className="animate-spin" />
+                                            <span>Menunggu pertandingan selanjutnya...</span>
+                                         </div>
+                                     </div>
+                                )}
+                
+                                 {knockoutPhase === 'FINISHED' && (
+                                     <button onClick={initKnockout} className="mt-8 px-6 py-3 bg-indigo-600 rounded-lg font-bold">
+                                         Turnamen Baru
+                                     </button>
+                                 )}
+                            </div>
+                        )
                     ) : (
                         /* Existing logic for VS AI / Battle Royale */
                         gameState === GameState.IDLE ? (
@@ -936,15 +1002,56 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                 
                                 {!isConnected ? (
                                     <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto">
-                                         <div className="w-full bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
-                                            <div className="flex justify-between items-center mb-1">
-                                                <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider flex items-center gap-1"><Globe size={10} /> IP Server</label>
+                                        
+                                        {/* Connection Panel Content Inlined Here for Battle Royale / VS AI */}
+                                        <div className="w-full bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 mb-4">
+                                            <div className="flex gap-2 mb-3">
+                                                <button 
+                                                    onClick={() => setConnectionMode('RAILWAY')}
+                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${connectionMode === 'RAILWAY' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                                                >
+                                                    <Cloud size={14} /> Server Cloud
+                                                </button>
+                                                <button 
+                                                    onClick={() => setConnectionMode('LOCAL')}
+                                                    className={`flex-1 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${connectionMode === 'LOCAL' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                                                >
+                                                    <Monitor size={14} /> Localhost
+                                                </button>
                                             </div>
-                                            <input type="text" value={serverIp} onChange={(e) => setServerIp(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-center outline-none" placeholder="localhost" />
+                                
+                                            {connectionMode === 'RAILWAY' ? (
+                                                <div className="space-y-2">
+                                                    <div>
+                                                        <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider block mb-1">Target TikTok Username (Live)</label>
+                                                        <input 
+                                                            type="text" 
+                                                            value={targetUsername} 
+                                                            onChange={(e) => setTargetUsername(e.target.value)} 
+                                                            className="w-full bg-slate-900 border border-indigo-500/50 rounded-lg px-3 py-2 text-white font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500" 
+                                                            placeholder="@username" 
+                                                        />
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-500 italic text-center">Menggunakan Server: buat-lev.up.railway.app</div>
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                     <label className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider block mb-1">IP Server Lokal</label>
+                                                     <input 
+                                                        type="text" 
+                                                        value={serverIp} 
+                                                        onChange={(e) => setServerIp(e.target.value)} 
+                                                        className="w-full bg-slate-900 border border-emerald-500/50 rounded-lg px-3 py-2 text-white font-mono text-center outline-none focus:ring-2 focus:ring-emerald-500" 
+                                                        placeholder="localhost" 
+                                                    />
+                                                    <div className="text-[10px] text-slate-500 italic text-center mt-2">Pastikan TikTok Live Connector berjalan di Port 62025</div>
+                                                </div>
+                                            )}
                                         </div>
+                                        
                                         <button onClick={connectSocket} disabled={isConnecting} className={`w-full px-8 py-4 rounded-xl font-bold text-xl shadow-lg transition-all flex items-center justify-center gap-3 ${isConnecting ? 'bg-slate-600' : 'bg-sky-600 hover:bg-sky-500'}`}>
                                             {isConnecting ? <Loader2 className="animate-spin" /> : <Server />} 
-                                            {isConnecting ? '...' : 'SAMBUNGKAN'}
+                                            {isConnecting ? 'MENGHUBUNGKAN...' : 'SAMBUNGKAN'}
                                         </button>
                                     </div>
                                 ) : (
@@ -1030,7 +1137,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                     </div>}
                                 </div>
                                 <div className="w-full text-center space-y-4">
-                                    {requiredPrefix && <div className="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-emerald-400 drop-shadow-2xl">{requiredPrefix}...</div>}
+                                    {requiredPrefix && (
+                                        <div className="flex flex-col items-center animate-pulse">
+                                            <span className={`text-xs font-bold uppercase tracking-widest mb-2 px-3 py-1 rounded-full border ${isAiTurn ? 'text-rose-400 border-rose-500/30 bg-rose-500/10' : 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'}`}>
+                                                {isAiTurn ? "GILIRAN AI MENJAWAB" : "GILIRAN NETIZEN"}
+                                            </span>
+                                            <div className={`text-5xl md:text-7xl font-black drop-shadow-2xl ${isAiTurn ? 'text-rose-500' : 'text-emerald-400'}`}>
+                                                {requiredPrefix}...
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="w-full max-w-md mx-auto"><Timer timeLeft={timeLeft} totalTime={30} /></div>
                                 </div>
                              </div>
