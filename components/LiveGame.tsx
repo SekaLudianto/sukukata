@@ -3,7 +3,7 @@ import { DictionaryEntry, GameState, TurnHistory, LiveAttempt, GameMode, Leaderb
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull, Bot, Cloud, Monitor } from 'lucide-react';
+import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Cloud, Monitor, Clock, Star, Skull, Bot } from 'lucide-react';
 import { io } from 'socket.io-client';
 
 // --- Varied Roasts for Live Game (AI Persona) ---
@@ -425,6 +425,94 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         }
     }, []);
 
+    // --- Process Chat Message Logic ---
+    const processChat = useCallback((data: any) => {
+        const current = stateRef.current;
+        const { uniqueId, nickname, profilePictureUrl, comment } = data;
+        
+        // BYPASS FILTER: Hapus semua karakter non-huruf
+        const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z]/g, '');
+
+        // --- MODE: LIVE KNOCKOUT LOGIC ---
+        if (current.mode === GameMode.LIVE_KNOCKOUT) {
+            // Lobby Phase
+            if (current.knockoutPhase === 'LOBBY') {
+                if (cleanWord === 'JOIN' || cleanWord === 'IKUT') {
+                    if (current.pastPlayerIds.has(uniqueId)) return;
+                    setLobbyPlayers(prev => {
+                        // Prevent duplicate join
+                        if (prev.find(p => p.uniqueId === uniqueId)) return prev;
+                        // Limit to 8 players
+                        if (prev.length >= 8) return prev;
+                        return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
+                    });
+                }
+                return;
+            }
+
+            // Match Phase - only process inputs if playing
+            if (current.knockoutPhase === 'BRACKET' && current.gameState === GameState.PLAYING && current.activeMatchIndex !== null) {
+                // STRICT TURN ENFORCEMENT
+                // Check if the message is from the player whose turn it is
+                if (uniqueId !== current.currentTurnPlayerId) {
+                    return; // Ignore answers from non-active player or spectators
+                }
+
+                // Validate Word
+                if (cleanWord && cleanWord.length === 5) {
+                    const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
+                    
+                    // Log attempt (only valid player attempts)
+                    setLiveAttempts(prev => [{
+                        uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
+                        word: cleanWord, isValid: result.valid, reason: result.error, timestamp: Date.now()
+                    }, ...prev.slice(0, 19)]); // Prepend new attempt
+
+                    if (result.valid && result.entry) {
+                        setLastWinner({ name: nickname || uniqueId, word: cleanWord });
+                        executeMove(result.entry.word, 'chat', result.entry.arti, nickname || uniqueId, profilePictureUrl, uniqueId);
+                    }
+                }
+                return;
+            }
+        }
+
+        // --- MODE: STANDARD LOGIC (VS AI / Battle Royale) ---
+        if (!cleanWord || current.mode === GameMode.LIVE_KNOCKOUT) return;
+
+        let isValid = false;
+        let reason = '';
+        let entry: DictionaryEntry | undefined;
+
+        if (current.gameState !== GameState.PLAYING) {
+            reason = "Game belum mulai";
+        } else if (current.isAiTurn && current.mode === GameMode.LIVE_VS_AI) {
+            reason = "Giliran AI";
+        } else if (cleanWord.length !== 5) {
+            reason = "Harus 5 huruf";
+        } else {
+                const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
+                isValid = result.valid;
+                reason = result.error || '';
+                entry = result.entry;
+        }
+        
+        // Prepend new attempt to array (newest at top)
+        setLiveAttempts(prev => [{
+            uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
+            word: cleanWord, isValid, reason, timestamp: Date.now()
+        }, ...prev.slice(0, 19)]);
+
+        const canExecute = isValid && entry && current.gameState === GameState.PLAYING && 
+            (!current.isAiTurn || current.mode === GameMode.LIVE_VS_NETIZEN);
+
+        if (canExecute) {
+            setLastWinner({ name: nickname || uniqueId, word: cleanWord });
+            executeMove(entry!.word, 'chat', entry!.arti, nickname || uniqueId, profilePictureUrl, uniqueId);
+        }
+    }, [executeMove]);
+
+
     // --- Socket.IO Connection ---
     const connectSocket = useCallback(() => {
         if (socketRef.current?.connected) return;
@@ -452,9 +540,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                 setIsConnected(true);
                 setIsConnecting(false);
 
-                // Jika menggunakan Railway, kita harus mengirim event 'setUniqueId' untuk memberi tahu backend
-                // username mana yang akan dipantau.
-                if (connectionMode === 'RAILWAY' && targetUsername) {
+                // Jika menggunakan Railway (atau local dengan script Nodejs manual), kita harus mengirim event 'setUniqueId'
+                if (targetUsername) {
                     socket.emit('setUniqueId', targetUsername, {
                         enableExtendedGiftInfo: true
                     });
@@ -462,109 +549,29 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
             });
 
             socket.on('tiktokConnected', (state: any) => {
-                // Bisa menambahkan logika tambahan jika koneksi ke TikTok berhasil
                 console.log("TikTok Live Connected!", state);
             });
 
             socket.on('tiktokDisconnected', (reason: string) => {
                 console.warn("TikTok Live Disconnected:", reason);
-                // Opsional: Handle disconnect UI
             });
 
+            // LISTEN TO 'chat' EVENT DIRECTLY (Fix for backend script compatibility)
+            socket.on('chat', (data: any) => {
+                processChat(data);
+            });
+
+            // ALSO LISTEN TO 'message' EVENT (Fallback for GUI Connector)
             socket.on('message', (rawData: any) => {
                 try {
                     let message = rawData;
                     if (typeof rawData === 'string') {
                         try { message = JSON.parse(rawData); } catch (e) { return; }
                     }
-
                     const { event, data: eventData } = message || {};
 
                     if (event === 'chat' && eventData) {
-                        const current = stateRef.current;
-                        const { uniqueId, nickname, profilePictureUrl, comment } = eventData;
-                        
-                        // BYPASS FILTER: Hapus semua karakter non-huruf (termasuk spasi, titik, angka, emoji)
-                        // Contoh: "H O N O R" -> "HONOR", "H.O.N.O.R" -> "HONOR"
-                        // Regex /[^A-Z]/g akan menghapus apapun yang bukan huruf A-Z kapital
-                        const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z]/g, '');
-
-                        // --- MODE: LIVE KNOCKOUT LOGIC ---
-                        if (current.mode === GameMode.LIVE_KNOCKOUT) {
-                            // Lobby Phase
-                            if (current.knockoutPhase === 'LOBBY') {
-                                if (cleanWord === 'JOIN' || cleanWord === 'IKUT') {
-                                    if (current.pastPlayerIds.has(uniqueId)) return;
-                                    setLobbyPlayers(prev => {
-                                        // Prevent duplicate join
-                                        if (prev.find(p => p.uniqueId === uniqueId)) return prev;
-                                        // Limit to 8 players
-                                        if (prev.length >= 8) return prev;
-                                        return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
-                                    });
-                                }
-                                return;
-                            }
-
-                            // Match Phase - only process inputs if playing
-                            if (current.knockoutPhase === 'BRACKET' && current.gameState === GameState.PLAYING && current.activeMatchIndex !== null) {
-                                // STRICT TURN ENFORCEMENT
-                                // Check if the message is from the player whose turn it is
-                                if (uniqueId !== current.currentTurnPlayerId) {
-                                    return; // Ignore answers from non-active player or spectators
-                                }
-
-                                // Validate Word
-                                if (cleanWord && cleanWord.length === 5) {
-                                    const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
-                                    
-                                    // Log attempt (only valid player attempts)
-                                    setLiveAttempts(prev => [...prev.slice(-19), {
-                                        uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
-                                        word: cleanWord, isValid: result.valid, reason: result.error, timestamp: Date.now()
-                                    }]);
-
-                                    if (result.valid && result.entry) {
-                                        setLastWinner({ name: nickname || uniqueId, word: cleanWord });
-                                        executeMove(result.entry.word, 'chat', result.entry.arti, nickname || uniqueId, profilePictureUrl, uniqueId);
-                                    }
-                                }
-                                return;
-                            }
-                        }
-
-                        // --- MODE: STANDARD LOGIC (VS AI / Battle Royale) ---
-                        if (!cleanWord || current.mode === GameMode.LIVE_KNOCKOUT) return;
-
-                        let isValid = false;
-                        let reason = '';
-                        let entry: DictionaryEntry | undefined;
-
-                        if (current.gameState !== GameState.PLAYING) {
-                            reason = "Game belum mulai";
-                        } else if (current.isAiTurn && current.mode === GameMode.LIVE_VS_AI) {
-                            reason = "Giliran AI";
-                        } else if (cleanWord.length !== 5) {
-                            reason = "Harus 5 huruf";
-                        } else {
-                             const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
-                             isValid = result.valid;
-                             reason = result.error || '';
-                             entry = result.entry;
-                        }
-                        
-                        setLiveAttempts(prev => [...prev.slice(-19), {
-                            uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
-                            word: cleanWord, isValid, reason, timestamp: Date.now()
-                        }]);
-
-                        const canExecute = isValid && entry && current.gameState === GameState.PLAYING && 
-                            (!current.isAiTurn || current.mode === GameMode.LIVE_VS_NETIZEN);
-
-                        if (canExecute) {
-                            setLastWinner({ name: nickname || uniqueId, word: cleanWord });
-                            executeMove(entry!.word, 'chat', entry!.arti, nickname || uniqueId, profilePictureUrl, uniqueId);
-                        }
+                        processChat(eventData);
                     }
                 } catch (e) {
                     console.error("Socket err", e);
@@ -576,14 +583,17 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
 
             socketRef.current = socket;
         } catch (e) { setIsConnecting(false); }
-    }, [executeMove, serverIp, connectionMode, targetUsername]); 
+    }, [processChat, serverIp, connectionMode, targetUsername]); 
 
     useEffect(() => {
         return () => { if (socketRef.current) socketRef.current.disconnect(); };
     }, []);
 
+    // Auto-scroll logic: Force scroll to top when new items arrive
     useEffect(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = 0;
+        }
     }, [liveAttempts]);
 
     // --- Game Timer & AI Logic ---
