@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { DictionaryEntry, GameSettings, GameState, TurnHistory, GameMode } from './types';
 import { getSyllableSuffix, findAIWord, validateUserWord, isValidDictionaryItem } from './utils/gameLogic';
 import { WordCard } from './components/WordCard';
 import { Timer } from './components/Timer';
 import { LiveGame } from './components/LiveGame';
 import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen, Swords, Zap, Medal } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 
 // --- Roasting Messages ---
 const ROASTS = {
@@ -56,6 +57,14 @@ const App: React.FC = () => {
     // Game Modes
     const [activeMode, setActiveMode] = useState<GameMode>(GameMode.SOLO);
 
+    // Global Socket State (Persistent Connection)
+    const socketRef = useRef<Socket | null>(null);
+    const [isConnected, setIsConnected] = useState(false);
+    const [isConnecting, setIsConnecting] = useState(false);
+    const [connectionMode, setConnectionMode] = useState<'RAILWAY' | 'LOCAL'>('RAILWAY');
+    const [serverIp, setServerIp] = useState('localhost');
+    const [targetUsername, setTargetUsername] = useState('');
+
     // Game Play State (Classic Mode)
     const [history, setHistory] = useState<TurnHistory[]>([]);
     const [usedWords, setUsedWords] = useState<Set<string>>(new Set());
@@ -97,6 +106,15 @@ const App: React.FC = () => {
             });
     }, []);
     
+    // Cleanup socket on unmount
+    useEffect(() => {
+        return () => {
+            if (socketRef.current) {
+                socketRef.current.disconnect();
+            }
+        };
+    }, []);
+
     // Timer Logic
     useEffect(() => {
         let interval: number;
@@ -145,6 +163,57 @@ const App: React.FC = () => {
 
 
     // --- Handlers ---
+    
+    // Global Socket Connection Handler
+    const connectSocket = useCallback(() => {
+        if (socketRef.current?.connected) return;
+        
+        if (connectionMode === 'RAILWAY' && !targetUsername) {
+            alert("Harap masukkan username TikTok untuk mode Server Cloud!");
+            return;
+        }
+
+        setIsConnecting(true); 
+
+        try {
+            // Logic URL Connection
+            let connectionString = '';
+            if (connectionMode === 'RAILWAY') {
+                connectionString = 'https://buat-lev.up.railway.app';
+            } else {
+                connectionString = `http://${serverIp}:62025`;
+            }
+
+            const socket = io(connectionString, { transports: ['websocket', 'polling'] });
+
+            socket.on('connect', () => {
+                console.log(`Terhubung ke Server ${connectionMode}`);
+                setIsConnected(true);
+                setIsConnecting(false);
+
+                // Jika menggunakan Railway (atau local dengan script Nodejs manual), kita harus mengirim event 'setUniqueId'
+                if (targetUsername) {
+                    socket.emit('setUniqueId', targetUsername, {
+                        enableExtendedGiftInfo: true
+                    });
+                }
+            });
+
+            socket.on('tiktokConnected', (state: any) => {
+                console.log("TikTok Live Connected!", state);
+            });
+
+            socket.on('tiktokDisconnected', (reason: string) => {
+                console.warn("TikTok Live Disconnected:", reason);
+            });
+
+            socket.on('disconnect', () => { setIsConnected(false); setIsConnecting(false); });
+            socket.on('connect_error', () => { setIsConnected(false); setIsConnecting(false); });
+
+            socketRef.current = socket;
+        } catch (e) { setIsConnecting(false); }
+    }, [serverIp, connectionMode, targetUsername]);
+
 
     const startGame = () => {
         if (dictionary.length === 0) return;
@@ -226,7 +295,25 @@ const App: React.FC = () => {
     // --- Render Helpers ---
 
     if (activeMode !== GameMode.SOLO) {
-        return <LiveGame mode={activeMode} dictionary={dictionary} onBack={() => setActiveMode(GameMode.SOLO)} />;
+        return (
+            <LiveGame 
+                mode={activeMode} 
+                dictionary={dictionary} 
+                onBack={() => setActiveMode(GameMode.SOLO)}
+                // Persistent connection props
+                socket={socketRef.current}
+                isConnected={isConnected}
+                isConnecting={isConnecting}
+                connectSocket={connectSocket}
+                // Persistent form props
+                connectionMode={connectionMode}
+                setConnectionMode={setConnectionMode}
+                serverIp={serverIp}
+                setServerIp={setServerIp}
+                targetUsername={targetUsername}
+                setTargetUsername={setTargetUsername}
+            />
+        );
     }
 
     if (gameState === GameState.IDLE) {

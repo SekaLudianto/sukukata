@@ -3,8 +3,8 @@ import { DictionaryEntry, GameState, TurnHistory, LiveAttempt, GameMode, Leaderb
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Cloud, Monitor, Clock, Star, Skull, Bot } from 'lucide-react';
-import { io } from 'socket.io-client';
+import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Cloud, Monitor, Clock, Star, Skull, Bot, RotateCcw } from 'lucide-react';
+import { Socket } from 'socket.io-client';
 
 // --- Varied Roasts for Live Game (AI Persona) ---
 const LIVE_ROASTS = {
@@ -39,9 +39,34 @@ interface LiveGameProps {
     dictionary: DictionaryEntry[];
     onBack: () => void;
     mode: GameMode;
+    // Persistent Connection Props
+    socket: Socket | null;
+    isConnected: boolean;
+    isConnecting: boolean;
+    connectSocket: () => void;
+    connectionMode: 'RAILWAY' | 'LOCAL';
+    setConnectionMode: (mode: 'RAILWAY' | 'LOCAL') => void;
+    serverIp: string;
+    setServerIp: (ip: string) => void;
+    targetUsername: string;
+    setTargetUsername: (username: string) => void;
 }
 
-export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) => {
+export const LiveGame: React.FC<LiveGameProps> = ({ 
+    dictionary, 
+    onBack, 
+    mode, 
+    socket, 
+    isConnected, 
+    isConnecting, 
+    connectSocket,
+    connectionMode,
+    setConnectionMode,
+    serverIp,
+    setServerIp,
+    targetUsername,
+    setTargetUsername
+}) => {
     // Game State
     const [gameState, setGameState] = useState<GameState>(GameState.IDLE);
     const [history, setHistory] = useState<TurnHistory[]>([]);
@@ -56,11 +81,6 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
     const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
     // Live Specific State
-    const [connectionMode, setConnectionMode] = useState<'RAILWAY' | 'LOCAL'>('RAILWAY');
-    const [serverIp, setServerIp] = useState('localhost');
-    const [targetUsername, setTargetUsername] = useState('');
-    const [isConnected, setIsConnected] = useState(false);
-    const [isConnecting, setIsConnecting] = useState(false);
     const [liveAttempts, setLiveAttempts] = useState<LiveAttempt[]>([]);
     const [lastWinner, setLastWinner] = useState<{name: string, word: string} | null>(null);
     const [gameOverReason, setGameOverReason] = useState('');
@@ -80,7 +100,6 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
     // New State for Knockout Flow Control
     const [matchStartCountdown, setMatchStartCountdown] = useState<number | null>(null);
 
-    const socketRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // --- State Refs to solve Stale Closures ---
@@ -152,6 +171,13 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         setHistory([]);
         setCurrentTurnPlayerId(null);
         setMatchStartCountdown(null);
+    };
+
+    const resetAllPlayers = () => {
+        if (window.confirm("Reset semua data pemain? Pemain yang sudah pernah ikut akan bisa bergabung lagi.")) {
+            setPastPlayerIds(new Set());
+            initKnockout();
+        }
     };
 
     const startKnockoutTournament = () => {
@@ -512,82 +538,40 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
         }
     }, [executeMove]);
 
-
-    // --- Socket.IO Connection ---
-    const connectSocket = useCallback(() => {
-        if (socketRef.current?.connected) return;
-        
-        if (connectionMode === 'RAILWAY' && !targetUsername) {
-            alert("Harap masukkan username TikTok untuk mode Server Cloud!");
-            return;
-        }
-
-        setIsConnecting(true); 
-
-        try {
-            // Logic URL Connection
-            let connectionString = '';
-            if (connectionMode === 'RAILWAY') {
-                connectionString = 'https://buat-lev.up.railway.app';
-            } else {
-                connectionString = `http://${serverIp}:62025`;
-            }
-
-            const socket = io(connectionString, { transports: ['websocket', 'polling'] });
-
-            socket.on('connect', () => {
-                console.log(`Terhubung ke Server ${connectionMode}`);
-                setIsConnected(true);
-                setIsConnecting(false);
-
-                // Jika menggunakan Railway (atau local dengan script Nodejs manual), kita harus mengirim event 'setUniqueId'
-                if (targetUsername) {
-                    socket.emit('setUniqueId', targetUsername, {
-                        enableExtendedGiftInfo: true
-                    });
-                }
-            });
-
-            socket.on('tiktokConnected', (state: any) => {
-                console.log("TikTok Live Connected!", state);
-            });
-
-            socket.on('tiktokDisconnected', (reason: string) => {
-                console.warn("TikTok Live Disconnected:", reason);
-            });
-
-            // LISTEN TO 'chat' EVENT DIRECTLY (Fix for backend script compatibility)
-            socket.on('chat', (data: any) => {
-                processChat(data);
-            });
-
-            // ALSO LISTEN TO 'message' EVENT (Fallback for GUI Connector)
-            socket.on('message', (rawData: any) => {
-                try {
-                    let message = rawData;
-                    if (typeof rawData === 'string') {
-                        try { message = JSON.parse(rawData); } catch (e) { return; }
-                    }
-                    const { event, data: eventData } = message || {};
-
-                    if (event === 'chat' && eventData) {
-                        processChat(eventData);
-                    }
-                } catch (e) {
-                    console.error("Socket err", e);
-                }
-            });
-
-            socket.on('disconnect', () => { setIsConnected(false); setIsConnecting(false); });
-            socket.on('connect_error', () => { setIsConnected(false); setIsConnecting(false); });
-
-            socketRef.current = socket;
-        } catch (e) { setIsConnecting(false); }
-    }, [processChat, serverIp, connectionMode, targetUsername]); 
-
+    // --- Socket Event Listeners ---
     useEffect(() => {
-        return () => { if (socketRef.current) socketRef.current.disconnect(); };
-    }, []);
+        if (!socket) return;
+
+        // Listener for direct chat events
+        const onChat = (data: any) => {
+            processChat(data);
+        };
+
+        // Listener for wrapped message events
+        const onMessage = (rawData: any) => {
+            try {
+                let message = rawData;
+                if (typeof rawData === 'string') {
+                    try { message = JSON.parse(rawData); } catch (e) { return; }
+                }
+                const { event, data: eventData } = message || {};
+
+                if (event === 'chat' && eventData) {
+                    processChat(eventData);
+                }
+            } catch (e) {
+                console.error("Socket err", e);
+            }
+        };
+
+        socket.on('chat', onChat);
+        socket.on('message', onMessage);
+
+        return () => {
+            socket.off('chat', onChat);
+            socket.off('message', onMessage);
+        };
+    }, [socket, processChat]);
 
     // Auto-scroll logic: Force scroll to top when new items arrive
     useEffect(() => {
@@ -808,7 +792,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                     })}
                                 </div>
             
-                                <div className="flex gap-2 justify-center w-full">
+                                <div className="flex gap-2 justify-center w-full flex-wrap">
                                      <button 
                                         onClick={simulateJoin}
                                         disabled={lobbyPlayers.length >= 8}
@@ -817,9 +801,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({ dictionary, onBack, mode }) 
                                         <UserPlus size={16} className="inline mr-1" /> SIMULASI JOIN
                                     </button>
                                     <button 
+                                        onClick={resetAllPlayers}
+                                        className="px-4 py-2 bg-rose-700 hover:bg-rose-600 text-white rounded-lg text-xs font-bold flex items-center"
+                                        title="Hapus riwayat pemain agar bisa main lagi"
+                                    >
+                                        <RotateCcw size={16} className="inline mr-1" /> RESET DATA
+                                    </button>
+                                    <button 
                                         onClick={startKnockoutTournament}
                                         disabled={lobbyPlayers.length < 8}
-                                        className="px-8 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:opacity-50 text-white rounded-xl font-bold text-xl shadow-lg transition-all"
+                                        className="px-8 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:opacity-50 text-white rounded-xl font-bold text-xl shadow-lg transition-all w-full md:w-auto"
                                     >
                                         MULAI
                                     </button>
