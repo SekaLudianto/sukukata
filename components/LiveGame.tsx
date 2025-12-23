@@ -80,9 +80,13 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const [chatScore, setChatScore] = useState(0);
     const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
+    // Gender Battle Specific State
+    const [genderScores, setGenderScores] = useState({ cewek: 0, cowok: 0 });
+    const [teamMap, setTeamMap] = useState<Record<string, 'cewek' | 'cowok'>>({});
+
     // Live Specific State
     const [liveAttempts, setLiveAttempts] = useState<LiveAttempt[]>([]);
-    const [lastWinner, setLastWinner] = useState<{name: string, word: string} | null>(null);
+    const [lastWinner, setLastWinner] = useState<{name: string, word: string, team?: 'cewek' | 'cowok'} | null>(null);
     const [gameOverReason, setGameOverReason] = useState('');
     const [roastMessage, setRoastMessage] = useState('');
     
@@ -119,15 +123,17 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         pastPlayerIds,
         currentTurnPlayerId,
         matchStartCountdown,
-        targetUsername
+        targetUsername,
+        genderScores,
+        teamMap
     });
 
     useEffect(() => {
         stateRef.current = { 
             gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard,
-            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, targetUsername
+            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, targetUsername, genderScores, teamMap
         };
-    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, targetUsername]);
+    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, targetUsername, genderScores, teamMap]);
 
     // --- Load Leaderboard from LocalStorage for Both Modes ---
     useEffect(() => {
@@ -136,6 +142,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             storageKey = 'sukukata_lb_battle';
         } else if (mode === GameMode.LIVE_VS_AI) {
             storageKey = 'sukukata_lb_coop';
+        } else if (mode === GameMode.LIVE_BATTLE_GENDER) {
+            storageKey = 'sukukata_lb_gender';
         }
 
         if (storageKey) {
@@ -332,7 +340,15 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const executeMove = useCallback((word: string, player: 'chat' | 'ai', definition: string, winnerName?: string, winnerProfilePic?: string, winnerId?: string) => {
         const w = word.toUpperCase();
         
-        setHistory(prev => [{ word: w, player, definition, timestamp: Date.now(), winnerName, winnerProfilePic }, ...prev]);
+        // Determine team for Gender Battle
+        let winningTeam: 'cewek' | 'cowok' | undefined;
+        if (stateRef.current.mode === GameMode.LIVE_BATTLE_GENDER && winnerId) {
+            winningTeam = stateRef.current.teamMap[winnerId];
+            if (winningTeam === 'cewek') setGenderScores(prev => ({ ...prev, cewek: prev.cewek + 1 }));
+            if (winningTeam === 'cowok') setGenderScores(prev => ({ ...prev, cowok: prev.cowok + 1 }));
+        }
+
+        setHistory(prev => [{ word: w, player, definition, timestamp: Date.now(), winnerName, winnerProfilePic, winnerTeam: winningTeam }, ...prev]);
         
         setUsedWords(prev => {
             const newSet = new Set(prev);
@@ -389,8 +405,11 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                     });
                 }
 
-             } else if (currentMode === GameMode.LIVE_VS_NETIZEN && winnerId && winnerName) {
-                // Battle Royale Leaderboard Logic (Persistent)
+             } else if ((currentMode === GameMode.LIVE_VS_NETIZEN || currentMode === GameMode.LIVE_BATTLE_GENDER) && winnerId && winnerName) {
+                // Battle Royale & Gender Battle Leaderboard Logic (Persistent)
+                const isGenderMode = currentMode === GameMode.LIVE_BATTLE_GENDER;
+                const storageKey = isGenderMode ? 'sukukata_lb_gender' : 'sukukata_lb_battle';
+                
                 setLeaderboard(prev => {
                     const existingIdx = prev.findIndex(p => p.uniqueId === winnerId);
                     let newBoard = [...prev];
@@ -400,29 +419,39 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                             ...newBoard[existingIdx],
                             score: newBoard[existingIdx].score + 1,
                             nickname: winnerName,
-                            profilePictureUrl: winnerProfilePic || newBoard[existingIdx].profilePictureUrl
+                            profilePictureUrl: winnerProfilePic || newBoard[existingIdx].profilePictureUrl,
+                            team: winningTeam || newBoard[existingIdx].team
                         };
                     } else {
                         newBoard.push({
                             uniqueId: winnerId,
                             nickname: winnerName,
                             profilePictureUrl: winnerProfilePic,
-                            score: 1
+                            score: 1,
+                            team: winningTeam
                         });
                     }
                     
                     // Sort descending by score
                     newBoard.sort((a, b) => b.score - a.score);
                     
-                    // Keep only Top 5
-                    const top5 = newBoard.slice(0, 5);
+                    // Keep only Top 10 for Gender Mode to show more stats
+                    const limit = isGenderMode ? 20 : 5;
+                    const topList = newBoard.slice(0, limit);
 
                     // Save to LocalStorage
-                    localStorage.setItem('sukukata_lb_battle', JSON.stringify(top5));
+                    localStorage.setItem(storageKey, JSON.stringify(topList));
                     
-                    return top5;
+                    return topList;
                 });
-                setIsAiTurn(false); 
+                
+                // For Gender Mode, continue AI vs Chat flow (AI doesn't stop answering)
+                if (currentMode === GameMode.LIVE_BATTLE_GENDER) {
+                     // In Gender mode, AI doesn't have a specific turn, it just facilitates or rescues
+                     setIsAiTurn(false);
+                } else {
+                     setIsAiTurn(false); 
+                }
              } else if (currentMode === GameMode.LIVE_KNOCKOUT && phase === 'BRACKET') {
                  // Knockout Logic: Turn Switching
                  const matchIdx = stateRef.current.activeMatchIndex;
@@ -457,7 +486,38 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         const { uniqueId, nickname, profilePictureUrl, comment } = data;
         
         // BYPASS FILTER: Hapus semua karakter non-huruf
-        const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z]/g, '');
+        const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z!]/g, '');
+
+        // --- MODE: GENDER BATTLE REGISTRATION ---
+        if (current.mode === GameMode.LIVE_BATTLE_GENDER) {
+            if (cleanWord === '!CEWEK' || cleanWord === '!COWOK') {
+                const team = cleanWord === '!CEWEK' ? 'cewek' : 'cowok';
+                setTeamMap(prev => ({ ...prev, [uniqueId]: team }));
+                return; // Registration only, not a game move
+            }
+            
+            // Check if player has joined a team
+            if (!current.teamMap[uniqueId]) {
+                 // Player hasn't joined a team yet, ignore their answer
+                 return;
+            }
+
+            // --- STRICT TURN LOGIC (TARIK TAMBANG) ---
+            // If the last winner was Cewek, only Cowok can answer now (and vice versa)
+            const lastTurn = current.history.length > 0 ? current.history[0] : null;
+            const playerTeam = current.teamMap[uniqueId];
+
+            if (lastTurn && lastTurn.player === 'chat' && lastTurn.winnerTeam) {
+                if (lastTurn.winnerTeam === 'cewek' && playerTeam === 'cewek') {
+                    // Cewek just won, wait for Cowok
+                    return; 
+                }
+                if (lastTurn.winnerTeam === 'cowok' && playerTeam === 'cowok') {
+                    // Cowok just won, wait for Cewek
+                    return;
+                }
+            }
+        }
 
         // --- MODE: LIVE KNOCKOUT LOGIC ---
         if (current.mode === GameMode.LIVE_KNOCKOUT) {
@@ -470,7 +530,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         if (prev.find(p => p.uniqueId === uniqueId)) return prev;
                         // Limit to 8 players
                         if (prev.length >= 8) return prev;
-                        return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
+                        return [...prev, { uniqueId: uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
                     });
                 }
                 return;
@@ -503,7 +563,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             }
         }
 
-        // --- MODE: STANDARD LOGIC (VS AI / Battle Royale) ---
+        // --- MODE: STANDARD LOGIC (VS AI / Battle Royale / Gender Battle) ---
         if (!cleanWord || current.mode === GameMode.LIVE_KNOCKOUT) return;
 
         let isValid = false;
@@ -523,17 +583,20 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                 entry = result.entry;
         }
         
+        const playerTeam = current.teamMap[uniqueId];
+
         // Prepend new attempt to array (newest at top)
         setLiveAttempts(prev => [{
             uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
-            word: cleanWord, isValid, reason, timestamp: Date.now()
+            word: cleanWord, isValid, reason, timestamp: Date.now(),
+            team: playerTeam
         }, ...prev.slice(0, 19)]);
 
         const canExecute = isValid && entry && current.gameState === GameState.PLAYING && 
-            (!current.isAiTurn || current.mode === GameMode.LIVE_VS_NETIZEN);
+            (!current.isAiTurn || current.mode === GameMode.LIVE_VS_NETIZEN || current.mode === GameMode.LIVE_BATTLE_GENDER);
 
         if (canExecute) {
-            setLastWinner({ name: nickname || uniqueId, word: cleanWord });
+            setLastWinner({ name: nickname || uniqueId, word: cleanWord, team: playerTeam });
             executeMove(entry!.word, 'chat', entry!.arti, nickname || uniqueId, profilePictureUrl, uniqueId);
         }
     }, [executeMove]);
@@ -592,11 +655,24 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                 if (isAiTurn) endGame(GameState.VICTORY, "AI Kehabisan Waktu (Prosesor Overheat)!");
                 else endGame(GameState.GAME_OVER, "Waktu Habis! Manusia terlalu lambat.");
             } else if (currentMode === GameMode.LIVE_VS_NETIZEN) {
-                // Battle Royale: AI Rescues
+                // Battle Royale: AI Rescues to keep stream going
                 const prefix = stateRef.current.requiredPrefix || '';
                 const aiMove = findAIWord(stateRef.current.dictionary, prefix, stateRef.current.usedWords);
                 if (aiMove) executeMove(aiMove.word, 'ai', aiMove.arti);
                 else endGame(GameState.VICTORY, `Sistem *Error*! AI juga tidak menemukan kata.`);
+            } else if (currentMode === GameMode.LIVE_BATTLE_GENDER) {
+                // Gender Battle: If time runs out, the LAST team to answer WINS.
+                const lastW = stateRef.current.history[0]; 
+                if (lastW && lastW.player === 'chat' && lastW.winnerTeam) {
+                     const winningTeamName = lastW.winnerTeam === 'cewek' ? 'TIM CEWEK' : 'TIM COWOK';
+                     endGame(GameState.VICTORY, `${winningTeamName} MENANG! Lawan gagal menjawab.`);
+                } else {
+                     // If no human played yet or AI started and no one answered
+                     const prefix = stateRef.current.requiredPrefix || '';
+                     const aiMove = findAIWord(stateRef.current.dictionary, prefix, stateRef.current.usedWords);
+                     if (aiMove) executeMove(aiMove.word, 'ai', aiMove.arti);
+                     else endGame(GameState.VICTORY, "Permainan berakhir.");
+                }
             } else if (currentMode === GameMode.LIVE_KNOCKOUT) {
                 // Knockout Logic: Time Out = Loss for current turn player
                 const matchIdx = stateRef.current.activeMatchIndex;
@@ -637,11 +713,14 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             setUsedWords(new Set());
             setAiScore(0);
             setChatScore(0);
+            setGenderScores({ cewek: 0, cowok: 0 }); // Reset gender scores
             
             // Only reset leaderboard if NOT battle royale (Battle Royale accumulates score)
             // UPDATE: Also do not reset for LIVE_VS_AI so MVP can accumulate across rounds
-            if (mode !== GameMode.LIVE_VS_NETIZEN && mode !== GameMode.LIVE_VS_AI) {
+            // UPDATE: Also do not reset for LIVE_BATTLE_GENDER
+            if (mode !== GameMode.LIVE_VS_NETIZEN && mode !== GameMode.LIVE_VS_AI && mode !== GameMode.LIVE_BATTLE_GENDER) {
                 setLeaderboard([]);
+                setTeamMap({});
             }
             
             setLastWinner(null);
@@ -676,7 +755,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                      <span className="text-[10px] font-bold bg-white/10 px-2 py-0.5 rounded uppercase">
-                         {mode === GameMode.LIVE_KNOCKOUT ? 'KNOCKOUT' : (mode === GameMode.LIVE_VS_NETIZEN ? 'BATTLE ROYALE' : 'VS AI')}
+                         {mode === GameMode.LIVE_KNOCKOUT ? 'KNOCKOUT' : (mode === GameMode.LIVE_VS_NETIZEN ? 'BATTLE ROYALE' : (mode === GameMode.LIVE_BATTLE_GENDER ? 'GENDER BATTLE' : 'VS AI'))}
                      </span>
                 </div>
             </div>
@@ -1096,8 +1175,27 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                                 {leaderboard.length === 0 && <div className="text-[9px] text-slate-500 text-center italic py-1">Belum ada skor</div>}
                                             </div>
                                         </div>
+                                    ) : mode === GameMode.LIVE_BATTLE_GENDER ? (
+                                        // GENDER BATTLE SCOREBOARD
+                                        <div className="w-full flex flex-col gap-2">
+                                            <div className="flex justify-between items-center bg-black/40 backdrop-blur-sm border border-purple-500/30 rounded-xl p-2 shadow-lg pointer-events-auto w-full">
+                                                <div className="flex flex-col items-center flex-1 border-r border-white/10">
+                                                    <span className="text-3xl md:text-5xl font-black text-rose-500">{genderScores.cewek}</span>
+                                                    <span className="text-[10px] md:text-xs font-bold bg-rose-500/20 px-3 py-0.5 rounded-full text-rose-200 uppercase">TIM CEWEK</span>
+                                                </div>
+                                                <div className="flex flex-col items-center flex-1">
+                                                    <span className="text-3xl md:text-5xl font-black text-sky-500">{genderScores.cowok}</span>
+                                                    <span className="text-[10px] md:text-xs font-bold bg-sky-500/20 px-3 py-0.5 rounded-full text-sky-200 uppercase">TIM COWOK</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-center">
+                                                <span className="text-[10px] bg-black/60 px-3 py-1 rounded-full text-slate-300 border border-white/10 animate-pulse">
+                                                    Ketik <span className="text-rose-400 font-bold">!CEWEK</span> atau <span className="text-sky-400 font-bold">!COWOK</span> untuk gabung tim!
+                                                </span>
+                                            </div>
+                                        </div>
                                     ) : (
-                                        // Bug Fix: Only show Battle Royale leaderboard if NOT in Knockout Mode
+                                        // Battle Royale leaderboard
                                         mode === GameMode.LIVE_VS_NETIZEN && (
                                             <div className="w-full max-w-sm bg-black/40 backdrop-blur-sm border border-amber-500/30 rounded-xl p-2 pointer-events-auto">
                                                 <div className="flex items-center justify-between mb-2 pb-1 border-b border-white/10">
@@ -1129,7 +1227,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                         <div className="relative">
                                             <WordCard data={lastWord} isLatest={true} />
                                             {lastWord.player === 'chat' && lastWord.winnerName && (
-                                                <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-xs font-bold px-1.5 py-1 rounded-full shadow-lg whitespace-nowrap animate-pop-in flex items-center gap-2 pr-3">
+                                                <div className={`absolute -bottom-3 left-1/2 -translate-x-1/2 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg whitespace-nowrap animate-pop-in flex items-center gap-2 pr-3 border ${lastWord.winnerTeam === 'cewek' ? 'bg-rose-500 border-rose-400' : (lastWord.winnerTeam === 'cowok' ? 'bg-sky-500 border-sky-400' : 'bg-emerald-500 border-emerald-400')}`}>
                                                     {lastWord.winnerProfilePic ? <img src={lastWord.winnerProfilePic} className="w-5 h-5 rounded-full border border-white/30" /> : <User size={10} />}
                                                     <span>{lastWord.winnerName}</span>
                                                 </div>
@@ -1140,27 +1238,110 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                 <div className="w-full text-center space-y-4">
                                     {requiredPrefix && (
                                         <div className="flex flex-col items-center animate-pulse">
-                                            <span className={`text-xs font-bold uppercase tracking-widest mb-2 px-3 py-1 rounded-full border ${isAiTurn ? 'text-rose-400 border-rose-500/30 bg-rose-500/10' : 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'}`}>
-                                                {isAiTurn ? "GILIRAN AI MENJAWAB" : "GILIRAN NETIZEN"}
-                                            </span>
-                                            <div className={`text-5xl md:text-7xl font-black drop-shadow-2xl ${isAiTurn ? 'text-rose-500' : 'text-emerald-400'}`}>
-                                                {requiredPrefix}...
-                                            </div>
+                                            {(() => {
+                                                let badgeText = "GILIRAN NETIZEN";
+                                                let badgeClass = "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
+                                                let textClass = "text-emerald-400";
+
+                                                if (isAiTurn) {
+                                                    badgeText = "GILIRAN AI MENJAWAB";
+                                                    badgeClass = "text-rose-400 border-rose-500/30 bg-rose-500/10";
+                                                    textClass = "text-rose-500";
+                                                } else if (mode === GameMode.LIVE_BATTLE_GENDER) {
+                                                     // Default neutral if no last winner or game just started
+                                                     badgeText = "SIAPA CEPAT DIA DAPAT!";
+                                                     badgeClass = "text-purple-300 border-purple-500/30 bg-purple-500/10";
+                                                     textClass = "text-white";
+
+                                                     // If there is a last word, show who won it to urge the other team
+                                                     if (lastWord?.winnerTeam === 'cewek') {
+                                                         badgeText = "GILIRAN COWOK BALAS!";
+                                                         badgeClass = "text-sky-300 border-sky-500/30 bg-sky-500/10";
+                                                         textClass = "text-sky-400";
+                                                     } else if (lastWord?.winnerTeam === 'cowok') {
+                                                         badgeText = "GILIRAN CEWEK BALAS!";
+                                                         badgeClass = "text-pink-300 border-pink-500/30 bg-pink-500/10";
+                                                         textClass = "text-pink-400";
+                                                     }
+                                                }
+
+                                                return (
+                                                    <>
+                                                        <span className={`text-xs font-bold uppercase tracking-widest mb-2 px-3 py-1 rounded-full border ${badgeClass}`}>
+                                                            {badgeText}
+                                                        </span>
+                                                        <div className={`text-5xl md:text-7xl font-black drop-shadow-2xl ${textClass}`}>
+                                                            {requiredPrefix}...
+                                                        </div>
+                                                    </>
+                                                );
+                                            })()}
                                         </div>
                                     )}
                                     <div className="w-full max-w-md mx-auto"><Timer timeLeft={timeLeft} totalTime={30} /></div>
                                 </div>
                              </div>
                         ) : (
-                            <div className="text-center animate-pop-in glass p-8 rounded-3xl max-w-md mx-auto relative z-30">
+                            <div className="text-center animate-pop-in glass p-6 md:p-8 rounded-3xl max-w-2xl mx-auto relative z-30 w-full">
                                 {/* Result Screen */}
-                                {gameState === GameState.VICTORY ? (
-                                     <Trophy size={80} className="text-yellow-400 animate-bounce mx-auto mb-4 drop-shadow-lg" />
+                                {mode === GameMode.LIVE_BATTLE_GENDER ? (
+                                    <div className="flex flex-col items-center w-full">
+                                        <div className="flex items-center gap-4 mb-6">
+                                            <div className="text-center">
+                                                <div className="text-6xl font-black text-rose-500 drop-shadow-lg">{genderScores.cewek}</div>
+                                                <div className="text-xs font-bold uppercase tracking-widest text-rose-200">TIM CEWEK</div>
+                                            </div>
+                                            <div className="text-4xl text-slate-500 font-black">VS</div>
+                                            <div className="text-center">
+                                                <div className="text-6xl font-black text-sky-500 drop-shadow-lg">{genderScores.cowok}</div>
+                                                <div className="text-xs font-bold uppercase tracking-widest text-sky-200">TIM COWOK</div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="text-2xl font-black text-yellow-400 mb-6 animate-bounce">
+                                            {genderScores.cewek > genderScores.cowok ? "TIM CEWEK MENANG! 💃" : (genderScores.cowok > genderScores.cewek ? "TIM COWOK MENANG! 🕺" : "SERI! 🤝")}
+                                        </div>
+
+                                        <div className="flex flex-row w-full gap-4 mb-6">
+                                            {/* Cewek MVP */}
+                                            <div className="flex-1 bg-rose-900/20 border border-rose-500/30 rounded-xl p-3">
+                                                <div className="text-xs font-bold text-rose-300 mb-2 uppercase border-b border-rose-500/20 pb-1">Top Cewek</div>
+                                                <div className="max-h-40 overflow-y-auto custom-scrollbar">
+                                                    {leaderboard.filter(l => l.team === 'cewek').slice(0, 5).map((p, i) => (
+                                                        <div key={i} className="flex justify-between text-xs mb-1">
+                                                            <span className="truncate">{i+1}. {p.nickname}</span>
+                                                            <span className="font-bold text-rose-400">{p.score}</span>
+                                                        </div>
+                                                    ))}
+                                                    {leaderboard.filter(l => l.team === 'cewek').length === 0 && <div className="text-[10px] italic text-rose-500/50">Belum ada data</div>}
+                                                </div>
+                                            </div>
+                                            {/* Cowok MVP */}
+                                            <div className="flex-1 bg-sky-900/20 border border-sky-500/30 rounded-xl p-3">
+                                                <div className="text-xs font-bold text-sky-300 mb-2 uppercase border-b border-sky-500/20 pb-1">Top Cowok</div>
+                                                <div className="max-h-40 overflow-y-auto custom-scrollbar">
+                                                    {leaderboard.filter(l => l.team === 'cowok').slice(0, 5).map((p, i) => (
+                                                        <div key={i} className="flex justify-between text-xs mb-1">
+                                                            <span className="truncate">{i+1}. {p.nickname}</span>
+                                                            <span className="font-bold text-sky-400">{p.score}</span>
+                                                        </div>
+                                                    ))}
+                                                    {leaderboard.filter(l => l.team === 'cowok').length === 0 && <div className="text-[10px] italic text-sky-500/50">Belum ada data</div>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 ) : (
-                                     <Skull size={80} className="text-rose-600 animate-pulse mx-auto mb-4 drop-shadow-[0_0_15px_rgba(225,29,72,0.5)]" />
+                                    <>
+                                        {gameState === GameState.VICTORY ? (
+                                             <Trophy size={80} className="text-yellow-400 animate-bounce mx-auto mb-4 drop-shadow-lg" />
+                                        ) : (
+                                             <Skull size={80} className="text-rose-600 animate-pulse mx-auto mb-4 drop-shadow-[0_0_15px_rgba(225,29,72,0.5)]" />
+                                        )}
+                                        <h2 className="text-4xl font-black mb-4 uppercase">{mode === GameMode.LIVE_VS_NETIZEN ? 'RONDE SELESAI' : (gameState === GameState.VICTORY ? 'MENANG!' : 'KALAH')}</h2>
+                                        <p className="text-white font-bold text-lg mb-1 italic">"{roastMessage}"</p>
+                                    </>
                                 )}
-                                <h2 className="text-4xl font-black mb-4 uppercase">{mode === GameMode.LIVE_VS_NETIZEN ? 'RONDE SELESAI' : (gameState === GameState.VICTORY ? 'MENANG!' : 'KALAH')}</h2>
-                                <p className="text-white font-bold text-lg mb-1 italic">"{roastMessage}"</p>
                                 <button onClick={startGame} className="w-full py-4 mt-8 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold text-lg transition-colors shadow-lg">MAIN LAGI</button>
                             </div>
                         )
@@ -1181,6 +1362,11 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                 <div className="flex justify-between items-start mb-1">
                                     <div className="flex items-center gap-2 overflow-hidden">
                                         <span className="font-bold text-slate-200 truncate">{attempt.nickname}</span>
+                                        {attempt.team && (
+                                            <span className={`text-[9px] px-1.5 rounded uppercase font-bold ${attempt.team === 'cewek' ? 'bg-rose-500 text-white' : 'bg-sky-500 text-white'}`}>
+                                                {attempt.team}
+                                            </span>
+                                        )}
                                     </div>
                                     <span className="text-[10px] opacity-50">{new Date(attempt.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
                                 </div>

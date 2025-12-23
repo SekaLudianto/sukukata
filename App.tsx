@@ -4,7 +4,7 @@ import { getSyllableSuffix, findAIWord, validateUserWord, isValidDictionaryItem 
 import { WordCard } from './components/WordCard';
 import { Timer } from './components/Timer';
 import { LiveGame } from './components/LiveGame';
-import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen, Swords, Zap, Medal } from 'lucide-react';
+import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen, Swords, Zap, Medal, Heart } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
 // --- Roasting Messages ---
@@ -411,12 +411,20 @@ const App: React.FC = () => {
                                         Battle Royale
                                     </button>
                                     <button 
+                                        onClick={() => setActiveMode(GameMode.LIVE_BATTLE_GENDER)}
+                                        disabled={dictionary.length === 0}
+                                        className="py-4 bg-gradient-to-r from-pink-600 to-sky-600 hover:from-pink-500 hover:to-sky-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-purple-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
+                                    >
+                                        <Heart size={16} />
+                                        Cewek vs Cowok
+                                    </button>
+                                    <button 
                                         onClick={() => setActiveMode(GameMode.LIVE_KNOCKOUT)}
                                         disabled={dictionary.length === 0}
-                                        className="col-span-2 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-purple-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
+                                        className="py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-purple-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
                                     >
                                         <Medal size={16} />
-                                        Turnamen Knockout (4P)
+                                        Turnamen (4P)
                                     </button>
                                 </div>
                             </div>
