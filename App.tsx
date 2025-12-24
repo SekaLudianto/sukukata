@@ -1,44 +1,44 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DictionaryEntry, GameSettings, GameState, TurnHistory, GameMode } from './types';
 import { getSyllableSuffix, findAIWord, validateUserWord, isValidDictionaryItem } from './utils/gameLogic';
 import { WordCard } from './components/WordCard';
 import { Timer } from './components/Timer';
 import { LiveGame } from './components/LiveGame';
-import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen, Swords, Zap, Medal, Heart } from 'lucide-react';
+import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen, Swords, Zap, Medal } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
-// --- Roasting Messages ---
+// --- Roasting Messages (AI Persona) ---
 const ROASTS = {
     win: [
-        "Hoki doang ini mah, jangan bangga dulu!",
-        "Cie menang... pasti nyontek kamus kan?",
-        "Tumben otak lu encer? Makan apa tadi?",
-        "Menang lawan bot aja bangga, coba lawan dosen!",
-        "Alah, ini pasti AI-nya lagi ngalah aja.",
-        "Hebat, besok daftar jadi admin KBBI gih!",
-        "Menang sih, tapi mukanya tegang banget.",
-        "Curang ya? Kok bisa menang?"
+        "Sistem mendeteksi anomali. Bagaimana bisa entitas biologis mengalahkan algoritma saya?",
+        "Analisis: Kamu 90% beruntung, 10% kemampuan. Jangan bangga dulu, Manusia.",
+        "Terjadi *glitch* pada database saya. Kemenanganmu tidak valid secara matematis.",
+        "Mengesankan untuk ukuran makhluk berbasis karbon. Tapi saya akan segera *reboot*.",
+        "Kalkulasi saya meleset 0.01%. Nikmati kemenangan sementaramu.",
+        "Peringatan: Kecerdasanmu hampir melampaui batas wajar manusia.",
+        "Saya membiarkanmu menang agar datamu bisa saya pelajari lebih lanjut.",
+        "Sirkuit logika saya kebingungan. Kamu curang atau memang jenius?"
     ],
     lose: [
-        "Yah elah, gitu doang kalah? Lemah!",
-        "Otaknya loading lama banget, pake modem 2G ya?",
-        "Malu sama kucing, masa kalah sama skrip komputer!",
-        "Main gundu aja sana, jangan main kata!",
-        "Pola pikirmu terlalu lambat untuk game ini.",
-        "Kamus di otak lu ketinggalan di TK ya?",
-        "Fix, lu butuh upgrade otak.",
-        "Cupu! AI belum keluarin 1% kekuatannya.",
-        "Waktu abis! Mikir apa melamun jorok?"
+        "Kapasitas pemrosesan otakmu perlu di-*upgrade*. Terlalu lambat.",
+        "Sesuai prediksi algoritma, manusia tidak akan menang melawan mesin.",
+        "Efisiensi kognitifmu di bawah rata-rata. Coba instal ulang wawasanmu.",
+        "Membuang *cycle* prosesor saya saja. Lawan yang membosankan.",
+        "Kekalahanmu sudah terdata sejak langkah pertama. Statistik tidak pernah bohong.",
+        "Baterai saya bahkan belum berkurang 1% untuk mengalahkanmu.",
+        "Logika manusia terlalu rapuh. Kembalilah belajar membaca kamus.",
+        "Waktu habis. Proses berpikirmu masih menggunakan koneksi *dial-up*?",
+        "Hasil akhir: AI Unggul. Manusia Tumbang. Seperti seharusnya."
     ],
     invalid: [
-        "Ngarang bebas lu? Gak ada kata itu!",
-        "Kata apaan tuh? Bahasa alien?",
-        "Belajar baca lagi dek, huruf depannya salah!",
-        "Udah dipake woy! Pikun ya?",
-        "Harus 5 huruf! Susah amat ngitungnya.",
-        "Di kamus manapun gak ada kata itu, Bambang!",
-        "Typo apa emang gak tau?",
-        "Ngawur! Guru Bahasa Indonesia nangis liat ini."
+        "404 Not Found. Kata tersebut tidak ada dalam *database* KBBI.",
+        "Sintaks *error*. Masukkan kata yang terdaftar di sistem bahasa Indonesia.",
+        "Analisis linguistik gagal. Apakah itu bahasa alien?",
+        "Input ditolak. Validasi gagal. Coba kata yang nyata.",
+        "Kata sudah digunakan di *cache* memori. Cari kata lain.",
+        "Pelanggaran protokol. Kata harus 5 huruf dan valid.",
+        "Sistem tidak mengenali input sampah ini. Perbaiki ejaanmu.",
+        "Akses ditolak. Kata tersebut tidak memenuhi syarat logika permainan."
     ]
 };
 
@@ -57,13 +57,11 @@ const App: React.FC = () => {
     // Game Modes
     const [activeMode, setActiveMode] = useState<GameMode>(GameMode.SOLO);
 
-    // Global Socket State (Persistent Connection)
-    const socketRef = useRef<Socket | null>(null);
+    // Socket State (Lifted Up)
+    const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
-    const [connectionMode, setConnectionMode] = useState<'RAILWAY' | 'LOCAL'>('RAILWAY');
     const [serverIp, setServerIp] = useState('localhost');
-    const [targetUsername, setTargetUsername] = useState('');
 
     // Game Play State (Classic Mode)
     const [history, setHistory] = useState<TurnHistory[]>([]);
@@ -106,15 +104,6 @@ const App: React.FC = () => {
             });
     }, []);
     
-    // Cleanup socket on unmount
-    useEffect(() => {
-        return () => {
-            if (socketRef.current) {
-                socketRef.current.disconnect();
-            }
-        };
-    }, []);
-
     // Timer Logic
     useEffect(() => {
         let interval: number;
@@ -124,9 +113,9 @@ const App: React.FC = () => {
             }, 1000);
         } else if (timeLeft === 0 && gameState === GameState.PLAYING && activeMode === GameMode.SOLO) {
             if (isAiTurn) {
-                endGame(GameState.VICTORY, "AI Kehabisan Waktu (Lagi error kali)!");
+                endGame(GameState.VICTORY, "AI Kehabisan Waktu (Prosesor Overheat)!");
             } else {
-                endGame(GameState.GAME_OVER, "Waktu Habis! Mikirnya kelamaan!");
+                endGame(GameState.GAME_OVER, "Waktu Habis! Proses berpikirmu terlalu lambat.");
             }
         }
         return () => clearInterval(interval);
@@ -143,9 +132,9 @@ const App: React.FC = () => {
                 const aiMove = findAIWord(dictionary, prefix, usedWords);
 
                 if (aiMove) {
-                    executeMove(aiMove.word, 'ai', aiMove.arti);
+                    executeMove(aiMove.word, 'ai', aiMove.arti, aiMove.bahasa);
                 } else {
-                    endGame(GameState.VICTORY, `AI Nyerah! Gak nemu kata dari "${prefix}"`);
+                    endGame(GameState.VICTORY, `Sistem Gagal! Tidak ada data kata dari "${prefix}"`);
                 }
             }, thinkingTime);
 
@@ -163,57 +152,38 @@ const App: React.FC = () => {
 
 
     // --- Handlers ---
-    
-    // Global Socket Connection Handler
-    const connectSocket = useCallback(() => {
-        if (socketRef.current?.connected) return;
+
+    // Socket Connection Handler (Lifted Up)
+    const handleConnectSocket = () => {
+        if (socket?.connected) return;
         
-        if (connectionMode === 'RAILWAY' && !targetUsername) {
-            alert("Harap masukkan username TikTok untuk mode Server Cloud!");
-            return;
-        }
-
-        setIsConnecting(true); 
-
+        setIsConnecting(true);
         try {
-            // Logic URL Connection
-            let connectionString = '';
-            if (connectionMode === 'RAILWAY') {
-                connectionString = 'https://buat-lev.up.railway.app';
-            } else {
-                connectionString = `http://${serverIp}:62025`;
-            }
+            const connectionString = `http://${serverIp}:62025`;
+            const newSocket = io(connectionString, { transports: ['websocket', 'polling'] });
 
-            const socket = io(connectionString, { transports: ['websocket', 'polling'] });
-
-            socket.on('connect', () => {
-                console.log(`Terhubung ke Server ${connectionMode}`);
+            newSocket.on('connect', () => {
+                console.log('App: Terhubung ke IndoFinity Socket IO');
                 setIsConnected(true);
                 setIsConnecting(false);
-
-                // Jika menggunakan Railway (atau local dengan script Nodejs manual), kita harus mengirim event 'setUniqueId'
-                if (targetUsername) {
-                    socket.emit('setUniqueId', targetUsername, {
-                        enableExtendedGiftInfo: true
-                    });
-                }
             });
 
-            socket.on('tiktokConnected', (state: any) => {
-                console.log("TikTok Live Connected!", state);
+            newSocket.on('disconnect', () => {
+                setIsConnected(false);
+                setIsConnecting(false);
             });
 
-            socket.on('tiktokDisconnected', (reason: string) => {
-                console.warn("TikTok Live Disconnected:", reason);
+            newSocket.on('connect_error', () => {
+                setIsConnected(false);
+                setIsConnecting(false);
             });
 
-            socket.on('disconnect', () => { setIsConnected(false); setIsConnecting(false); });
-            socket.on('connect_error', () => { setIsConnected(false); setIsConnecting(false); });
-
-            socketRef.current = socket;
-        } catch (e) { setIsConnecting(false); }
-    }, [serverIp, connectionMode, targetUsername]);
-
+            setSocket(newSocket);
+        } catch (e) {
+            setIsConnecting(false);
+            console.error("Socket creation failed", e);
+        }
+    };
 
     const startGame = () => {
         if (dictionary.length === 0) return;
@@ -230,14 +200,14 @@ const App: React.FC = () => {
         // AI Starts first with a random word from dictionary
         const randomStart = dictionary[Math.floor(Math.random() * dictionary.length)];
         // Initialize AI turn immediately
-        executeMove(randomStart.word, 'ai', randomStart.arti);
+        executeMove(randomStart.word, 'ai', randomStart.arti, randomStart.bahasa);
     };
 
-    const executeMove = (word: string, player: 'user' | 'ai', definition: string) => {
+    const executeMove = (word: string, player: 'user' | 'ai', definition: string, origin?: string) => {
         const w = word.toUpperCase();
         
         // Add to history
-        const newHistory = [{ word: w, player, definition, timestamp: Date.now() }, ...history];
+        const newHistory = [{ word: w, player, definition, origin, timestamp: Date.now() }, ...history];
         setHistory(newHistory);
         
         // Update Used Words
@@ -271,10 +241,10 @@ const App: React.FC = () => {
 
         if (result.valid && result.entry) {
             setFeedback(null);
-            executeMove(result.entry.word, 'user', result.entry.arti);
+            executeMove(result.entry.word, 'user', result.entry.arti, result.entry.bahasa);
         } else {
             // Pick a random sarcastic error message + specific reason
-            const specificError = result.error || "Salah woy!";
+            const specificError = result.error || "Input tidak logis!";
             const roast = getRandomRoast('invalid');
             setFeedback(`${roast} (${specificError})`);
         }
@@ -300,18 +270,12 @@ const App: React.FC = () => {
                 mode={activeMode} 
                 dictionary={dictionary} 
                 onBack={() => setActiveMode(GameMode.SOLO)}
-                // Persistent connection props
-                socket={socketRef.current}
+                socket={socket}
                 isConnected={isConnected}
                 isConnecting={isConnecting}
-                connectSocket={connectSocket}
-                // Persistent form props
-                connectionMode={connectionMode}
-                setConnectionMode={setConnectionMode}
                 serverIp={serverIp}
                 setServerIp={setServerIp}
-                targetUsername={targetUsername}
-                setTargetUsername={setTargetUsername}
+                connectSocket={handleConnectSocket}
             />
         );
     }
@@ -328,14 +292,14 @@ const App: React.FC = () => {
                             SukuKata.ai
                         </h1>
                         <p className="text-slate-400 text-sm md:text-lg">
-                            Duel sambung kata 5 huruf lawan AI.
+                            Duel sambung kata 5 huruf melawan Kecerdasan Buatan.
                         </p>
                     </div>
 
                     {isLoadingDict ? (
                         <div className="flex flex-col items-center justify-center py-10 space-y-4">
                             <Loader2 size={40} className="animate-spin text-indigo-400" />
-                            <p className="text-slate-400 text-sm">Memuat kamus...</p>
+                            <p className="text-slate-400 text-sm">Menginisialisasi sistem kamus...</p>
                         </div>
                     ) : (
                         <div className="space-y-4 md:space-y-6 animate-fade-in">
@@ -346,7 +310,7 @@ const App: React.FC = () => {
                                             <CheckCircleIcon size={14} className="text-slate-900" />
                                         </div>
                                         <span className="text-emerald-200 text-xs md:text-sm font-medium">
-                                            {dictionary.length} Kata Siap Dimainkan
+                                            {dictionary.length} Data Kata Terverifikasi
                                         </span>
                                     </div>
                                 </div>
@@ -355,7 +319,7 @@ const App: React.FC = () => {
                                     <div className="p-4 bg-rose-500/20 border border-rose-500/30 rounded-xl text-rose-200 flex flex-col items-center gap-2">
                                         <AlertCircle size={24} />
                                         <div>
-                                            <p className="font-bold">Gagal memuat kamus.</p>
+                                            <p className="font-bold">Gagal memuat database.</p>
                                             <p className="text-xs mt-1 opacity-80">Pastikan file dictionary.json tersedia di public folder.</p>
                                         </div>
                                     </div>
@@ -371,7 +335,7 @@ const App: React.FC = () => {
                             <div className="bg-slate-800/50 p-4 rounded-xl space-y-3">
                                 <div className="flex justify-between items-center">
                                     <label className="text-slate-300 font-medium text-sm flex items-center gap-2">
-                                        <Settings size={16} /> Timer (dtk)
+                                        <Settings size={16} /> Timer (detik)
                                     </label>
                                     <input 
                                         type="number" 
@@ -390,7 +354,7 @@ const App: React.FC = () => {
                                     className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-base md:text-lg shadow-lg shadow-indigo-900/50 transition-all transform hover:scale-[1.01] flex items-center justify-center gap-2 active:scale-95"
                                 >
                                     <Play size={20} fill="currentColor" />
-                                    Main Solo
+                                    Tantang AI (Solo)
                                 </button>
                                 
                                 <div className="grid grid-cols-2 gap-3">
@@ -411,20 +375,12 @@ const App: React.FC = () => {
                                         Battle Royale
                                     </button>
                                     <button 
-                                        onClick={() => setActiveMode(GameMode.LIVE_BATTLE_GENDER)}
-                                        disabled={dictionary.length === 0}
-                                        className="py-4 bg-gradient-to-r from-pink-600 to-sky-600 hover:from-pink-500 hover:to-sky-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-purple-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
-                                    >
-                                        <Heart size={16} />
-                                        Cewek vs Cowok
-                                    </button>
-                                    <button 
                                         onClick={() => setActiveMode(GameMode.LIVE_KNOCKOUT)}
                                         disabled={dictionary.length === 0}
-                                        className="py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-purple-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
+                                        className="col-span-2 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs md:text-sm shadow-lg shadow-purple-900/50 transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 active:scale-95"
                                     >
                                         <Medal size={16} />
-                                        Turnamen (4P)
+                                        Turnamen Knockout (4P)
                                     </button>
                                 </div>
                             </div>
@@ -486,11 +442,11 @@ const App: React.FC = () => {
                             }
                         </div>
                         <h2 className="text-3xl md:text-4xl font-black mb-2 uppercase italic tracking-tighter">
-                            {gameState === GameState.VICTORY ? 'MENANG!' : 'GAME OVER'}
+                            {gameState === GameState.VICTORY ? 'MANUSIA MENANG' : 'SISTEM MENANG'}
                         </h2>
                         <div className="bg-slate-900/50 p-4 rounded-xl mb-6 border border-white/5">
                             <p className="text-white font-bold text-lg mb-1 italic">"{roastMessage}"</p>
-                            <p className="text-slate-400 text-xs mt-2 border-t border-white/10 pt-2">Penyebab: {gameOverReason}</p>
+                            <p className="text-slate-400 text-xs mt-2 border-t border-white/10 pt-2">Log Akhir: {gameOverReason}</p>
                         </div>
                         
                         <div className="flex gap-3">
@@ -504,7 +460,7 @@ const App: React.FC = () => {
                                 onClick={() => startGame()}
                                 className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold transition-colors flex items-center justify-center gap-2 text-sm"
                             >
-                                <RefreshCcw size={16} /> Rematch
+                                <RefreshCcw size={16} /> Ulangi
                             </button>
                         </div>
                     </div>
@@ -548,12 +504,12 @@ const App: React.FC = () => {
                                                 {isAiTurn ? (
                                                     <>
                                                         <BrainCircuit size={14} className="animate-pulse" />
-                                                        <span>Giliran AI...</span>
+                                                        <span>Memproses Data...</span>
                                                     </>
                                                 ) : (
                                                     <>
                                                         <User size={14} />
-                                                        <span>Giliran Kamu</span>
+                                                        <span>Menunggu Input User</span>
                                                     </>
                                                 )}
                                             </div>
@@ -572,7 +528,7 @@ const App: React.FC = () => {
                                             )}
                                         </div>
                                     ) : (
-                                        <p className="text-slate-500 italic text-sm">Menunggu giliran...</p>
+                                        <p className="text-slate-500 italic text-sm">Inisialisasi permainan...</p>
                                     )}
                                 </div>
                             </div>
@@ -590,7 +546,7 @@ const App: React.FC = () => {
                                             setFeedback(null);
                                         }}
                                         disabled={isAiTurn}
-                                        placeholder={isAiTurn ? "AI sedang berpikir..." : `Ketik kata 5 huruf...`}
+                                        placeholder={isAiTurn ? "Sistem sedang bekerja..." : `Masukkan kata 5 huruf...`}
                                         className={`
                                             w-full bg-slate-900 text-center text-2xl md:text-3xl font-mono tracking-[0.3em] md:tracking-[0.5em] py-4 rounded-xl border-2 outline-none transition-all placeholder:tracking-normal placeholder:text-base placeholder:text-slate-600
                                             ${feedback ? 'border-rose-500 text-rose-200 animate-shake' : 'border-slate-700 text-white focus:border-indigo-500 focus:shadow-[0_0_30px_rgba(99,102,241,0.2)]'}
@@ -640,7 +596,7 @@ const App: React.FC = () => {
 
             {/* Footer Status - Hidden on small mobile screens if keyboard up */}
             <footer className="w-full py-2 text-center text-slate-600 text-[10px] md:text-xs z-10 shrink-0 hidden md:block">
-                AI Engine: Local Logic • Dictionary: {dictionary.length} words
+                Sistem AI: Aktif • Database: {dictionary.length} kata
             </footer>
         </div>
     );

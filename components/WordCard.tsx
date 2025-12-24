@@ -1,6 +1,6 @@
 import React from 'react';
 import { TurnHistory } from '../types';
-import { BookOpen, User, Bot } from 'lucide-react';
+import { BookOpen, User, Bot, Globe2 } from 'lucide-react';
 import { getSyllableSuffix } from '../utils/gameLogic';
 
 interface WordCardProps {
@@ -23,7 +23,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, isLatest }) => {
                 ? 'bg-rose-500/10 border-rose-500/30 text-rose-100' 
                 : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-100'}
         `}>
-            <div className="flex justify-between items-center mb-1">
+            <div className="flex justify-between items-start mb-1">
                 <div className="flex items-center gap-1.5">
                     <span className={`p-1 rounded-full ${isAi ? 'bg-rose-500/20' : 'bg-emerald-500/20'}`}>
                         {isAi ? <Bot size={12} /> : <User size={12} />}
@@ -32,14 +32,24 @@ export const WordCard: React.FC<WordCardProps> = ({ data, isLatest }) => {
                         {isAi ? 'AI' : 'Kamu'}
                     </span>
                 </div>
-                {isLatest && (
-                    <span className="animate-pulse text-[10px] bg-white/10 px-1.5 py-0.5 rounded-full border border-white/10">
-                        BARU
-                    </span>
-                )}
+                <div className="flex items-center gap-1.5">
+                    {data.origin && (
+                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/20 border border-white/5">
+                             <Globe2 size={8} className="opacity-70" />
+                             <span className="text-[9px] uppercase tracking-wide font-bold opacity-80 max-w-[80px] truncate">
+                                 {data.origin}
+                             </span>
+                        </div>
+                    )}
+                    {isLatest && (
+                        <span className="animate-pulse text-[10px] bg-white/10 px-1.5 py-0.5 rounded-full border border-white/10 font-bold">
+                            BARU
+                        </span>
+                    )}
+                </div>
             </div>
             
-            <div className="text-2xl md:text-3xl font-black tracking-widest mb-1 font-mono text-center flex justify-center">
+            <div className="text-2xl md:text-3xl font-black tracking-widest mb-1 font-mono text-center flex justify-center py-1">
                 <span className="opacity-70">{stem}</span>
                 <span className={`${isAi ? 'text-rose-400' : 'text-emerald-400'} underline decoration-2 underline-offset-4`}>{suffix}</span>
             </div>

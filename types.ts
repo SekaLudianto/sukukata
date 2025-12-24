@@ -14,10 +14,10 @@ export interface TurnHistory {
     word: string;
     player: 'user' | 'ai' | 'chat';
     definition: string;
+    origin?: string; // Origin language (e.g., Jawa, Arab, Sanskerta)
     timestamp: number;
     winnerName?: string; // For Chat winner
     winnerProfilePic?: string; // For Chat winner avatar
-    winnerTeam?: 'cewek' | 'cowok'; // For Gender Battle
 }
 
 export enum GameState {
@@ -31,8 +31,7 @@ export enum GameMode {
     SOLO = 'SOLO',
     LIVE_VS_AI = 'LIVE_VS_AI',
     LIVE_VS_NETIZEN = 'LIVE_VS_NETIZEN',
-    LIVE_KNOCKOUT = 'LIVE_KNOCKOUT',
-    LIVE_BATTLE_GENDER = 'LIVE_BATTLE_GENDER'
+    LIVE_KNOCKOUT = 'LIVE_KNOCKOUT'
 }
 
 export interface LeaderboardEntry {
@@ -40,7 +39,6 @@ export interface LeaderboardEntry {
     nickname: string;
     profilePictureUrl?: string;
     score: number;
-    team?: 'cewek' | 'cowok';
 }
 
 // IndoFinity Types
@@ -65,7 +63,6 @@ export interface LiveAttempt {
     isValid: boolean;
     reason?: string;
     timestamp: number;
-    team?: 'cewek' | 'cowok';
 }
 
 // Knockout Types
