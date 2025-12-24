@@ -3,7 +3,7 @@ import { DictionaryEntry, GameState, TurnHistory, LiveAttempt, GameMode, Leaderb
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull, Bot, Trash2 } from 'lucide-react';
+import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull, Bot, Trash2, Cast, Laptop, Cloud } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 
 // --- Varied Roasts for Live Game (AI Persona) ---
@@ -35,6 +35,8 @@ const getRandomRoast = (type: 'win' | 'lose') => {
     return list[Math.floor(Math.random() * list.length)];
 };
 
+const CLOUD_URL = 'https://buat-lev.up.railway.app';
+
 interface LiveGameProps {
     dictionary: DictionaryEntry[];
     onBack: () => void;
@@ -45,6 +47,12 @@ interface LiveGameProps {
     serverIp: string;
     setServerIp: (ip: string) => void;
     connectSocket: () => void;
+    tiktokUsername: string;
+    setTiktokUsername: (val: string) => void;
+    isStreamConnected: boolean;
+    setIsStreamConnected: (val: boolean) => void;
+    connectionMode: 'cloud' | 'local';
+    setConnectionMode: (val: 'cloud' | 'local') => void;
 }
 
 export const LiveGame: React.FC<LiveGameProps> = ({ 
@@ -56,7 +64,13 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     isConnecting, 
     serverIp, 
     setServerIp, 
-    connectSocket 
+    connectSocket,
+    tiktokUsername,
+    setTiktokUsername,
+    isStreamConnected,
+    setIsStreamConnected,
+    connectionMode,
+    setConnectionMode
 }) => {
     // Game State
     const [gameState, setGameState] = useState<GameState>(GameState.IDLE);
@@ -66,6 +80,9 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const [timeLeft, setTimeLeft] = useState(0);
     const [isAiTurn, setIsAiTurn] = useState(false);
     
+    // Auto join flag - local state is fine here as it's a transient action
+    const [autoJoinStream, setAutoJoinStream] = useState(false);
+
     // Scores & Leaderboard (Modes other than Knockout)
     const [aiScore, setAiScore] = useState(0);
     const [chatScore, setChatScore] = useState(0);
@@ -76,6 +93,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const [lastWinner, setLastWinner] = useState<{name: string, word: string} | null>(null);
     const [gameOverReason, setGameOverReason] = useState('');
     const [roastMessage, setRoastMessage] = useState('');
+    // tiktokUsername and isStreamConnected are now props
+    const [streamConnecting, setStreamConnecting] = useState(false);
     
     // Knockout Specific State
     const [knockoutPlayers, setKnockoutPlayers] = useState<KnockoutPlayer[]>([]);
@@ -109,15 +128,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         lobbyPlayers,
         pastPlayerIds,
         currentTurnPlayerId,
-        matchStartCountdown
+        matchStartCountdown,
+        tiktokUsername
     });
 
     useEffect(() => {
         stateRef.current = { 
             gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard,
-            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown
+            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, tiktokUsername
         };
-    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown]);
+    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, tiktokUsername]);
 
     // --- Load Leaderboard from LocalStorage for Both Modes ---
     useEffect(() => {
@@ -441,111 +461,177 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         }
     }, []);
 
+    // --- Connect to specific TikTok Live Stream ---
+    const connectToStream = useCallback(() => {
+        if (!socket || !tiktokUsername) return;
+        setStreamConnecting(true);
+        // The backend expects 'setUniqueId' event to start the connection
+        socket.emit('setUniqueId', tiktokUsername, {
+            enableExtendedGiftInfo: true
+        });
+    }, [socket, tiktokUsername]);
+
+    const handleCloudConnect = () => {
+        if (!tiktokUsername) {
+            alert('Mohon masukkan Username TikTok!');
+            return;
+        }
+        setServerIp(CLOUD_URL);
+        setAutoJoinStream(true);
+        connectSocket();
+    };
+
+    const handleLocalConnect = () => {
+         setAutoJoinStream(false);
+         connectSocket();
+    };
+
     // --- Socket.IO Listener Management ---
     useEffect(() => {
         if (!socket || !isConnected) return;
 
-        const handleMessage = (rawData: any) => {
-            try {
+        // Auto join logic for Cloud Mode
+        if (autoJoinStream && tiktokUsername) {
+            connectToStream();
+            setAutoJoinStream(false); // Reset flag
+        }
+
+        // Listen for specific events from the custom backend script (Cloud)
+        
+        // 1. Connection Status
+        const handleTikTokConnected = (state: any) => {
+            console.log("TikTok Connected", state);
+            setIsStreamConnected(true);
+            setStreamConnecting(false);
+        };
+
+        const handleTikTokDisconnected = (reason: string) => {
+            console.log("TikTok Disconnected", reason);
+            setIsStreamConnected(false);
+            setStreamConnecting(false);
+        };
+
+        // 2. Chat Events (Main Game Logic)
+        const processChatData = (data: any) => {
+             // Data structure: { uniqueId, nickname, profilePictureUrl, comment, ... }
+            const current = stateRef.current;
+            const { uniqueId, nickname, profilePictureUrl, comment } = data;
+            
+            const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z]/g, '');
+
+            // --- MODE: LIVE KNOCKOUT LOGIC ---
+            if (current.mode === GameMode.LIVE_KNOCKOUT) {
+                // Lobby Phase
+                if (current.knockoutPhase === 'LOBBY') {
+                    if (cleanWord === 'JOIN' || cleanWord === 'IKUT') {
+                        if (current.pastPlayerIds.has(uniqueId)) return;
+                        setLobbyPlayers(prev => {
+                            // Prevent duplicate join
+                            if (prev.find(p => p.uniqueId === uniqueId)) return prev;
+                            // Limit to 8 players
+                            if (prev.length >= 8) return prev;
+                            return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
+                        });
+                    }
+                    return;
+                }
+
+                // Match Phase - only process inputs if playing
+                if (current.knockoutPhase === 'BRACKET' && current.gameState === GameState.PLAYING && current.activeMatchIndex !== null) {
+                    // STRICT TURN ENFORCEMENT
+                    if (uniqueId !== current.currentTurnPlayerId) {
+                        return; 
+                    }
+
+                    // Validate Word
+                    if (cleanWord && cleanWord.length === 5) {
+                        const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
+                        
+                        setLiveAttempts(prev => [...prev.slice(-19), {
+                            uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
+                            word: cleanWord, isValid: result.valid, reason: result.error, timestamp: Date.now()
+                        }]);
+
+                        if (result.valid && result.entry) {
+                            setLastWinner({ name: nickname || uniqueId, word: cleanWord });
+                            executeMove(result.entry.word, 'chat', result.entry.arti, result.entry.bahasa, nickname || uniqueId, profilePictureUrl, uniqueId);
+                        }
+                    }
+                    return;
+                }
+            }
+
+            // --- MODE: STANDARD LOGIC (VS AI / Battle Royale) ---
+            if (!cleanWord || current.mode === GameMode.LIVE_KNOCKOUT) return;
+
+            let isValid = false;
+            let reason = '';
+            let entry: DictionaryEntry | undefined;
+
+            if (current.gameState !== GameState.PLAYING) {
+                reason = "Game belum mulai";
+            } else if (current.isAiTurn && current.mode === GameMode.LIVE_VS_AI) {
+                reason = "Giliran AI";
+            } else if (cleanWord.length !== 5) {
+                reason = "Harus 5 huruf";
+            } else {
+                    const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
+                    isValid = result.valid;
+                    reason = result.error || '';
+                    entry = result.entry;
+            }
+            
+            setLiveAttempts(prev => [...prev.slice(-19), {
+                uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
+                word: cleanWord, isValid, reason, timestamp: Date.now()
+            }]);
+
+            const canExecute = isValid && entry && current.gameState === GameState.PLAYING && 
+                (!current.isAiTurn || current.mode === GameMode.LIVE_VS_NETIZEN);
+
+            if (canExecute) {
+                setLastWinner({ name: nickname || uniqueId, word: cleanWord });
+                executeMove(entry!.word, 'chat', entry!.arti, entry!.bahasa, nickname || uniqueId, profilePictureUrl, uniqueId);
+            }
+        };
+
+        const handleChat = (data: any) => {
+            processChatData(data);
+        };
+
+        // Handle Legacy Message Event (Localhost Desktop Connector)
+        const handleLegacyMessage = (rawData: any) => {
+             try {
                 let message = rawData;
                 if (typeof rawData === 'string') {
                     try { message = JSON.parse(rawData); } catch (e) { return; }
                 }
+                const { event, data } = message || {};
+                
+                // If the desktop connector is connected, we consider the stream connected
+                if (!isStreamConnected) setIsStreamConnected(true);
 
-                const { event, data: eventData } = message || {};
-
-                if (event === 'chat' && eventData) {
-                    const current = stateRef.current;
-                    const { uniqueId, nickname, profilePictureUrl, comment } = eventData;
-                    
-                    const cleanWord = (comment || '').toUpperCase().replace(/[^A-Z]/g, '');
-
-                    // --- MODE: LIVE KNOCKOUT LOGIC ---
-                    if (current.mode === GameMode.LIVE_KNOCKOUT) {
-                        // Lobby Phase
-                        if (current.knockoutPhase === 'LOBBY') {
-                            if (cleanWord === 'JOIN' || cleanWord === 'IKUT') {
-                                if (current.pastPlayerIds.has(uniqueId)) return;
-                                setLobbyPlayers(prev => {
-                                    // Prevent duplicate join
-                                    if (prev.find(p => p.uniqueId === uniqueId)) return prev;
-                                    // Limit to 8 players
-                                    if (prev.length >= 8) return prev;
-                                    return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
-                                });
-                            }
-                            return;
-                        }
-
-                        // Match Phase - only process inputs if playing
-                        if (current.knockoutPhase === 'BRACKET' && current.gameState === GameState.PLAYING && current.activeMatchIndex !== null) {
-                            // STRICT TURN ENFORCEMENT
-                            if (uniqueId !== current.currentTurnPlayerId) {
-                                return; 
-                            }
-
-                            // Validate Word
-                            if (cleanWord && cleanWord.length === 5) {
-                                const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
-                                
-                                setLiveAttempts(prev => [...prev.slice(-19), {
-                                    uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
-                                    word: cleanWord, isValid: result.valid, reason: result.error, timestamp: Date.now()
-                                }]);
-
-                                if (result.valid && result.entry) {
-                                    setLastWinner({ name: nickname || uniqueId, word: cleanWord });
-                                    executeMove(result.entry.word, 'chat', result.entry.arti, result.entry.bahasa, nickname || uniqueId, profilePictureUrl, uniqueId);
-                                }
-                            }
-                            return;
-                        }
-                    }
-
-                    // --- MODE: STANDARD LOGIC (VS AI / Battle Royale) ---
-                    if (!cleanWord || current.mode === GameMode.LIVE_KNOCKOUT) return;
-
-                    let isValid = false;
-                    let reason = '';
-                    let entry: DictionaryEntry | undefined;
-
-                    if (current.gameState !== GameState.PLAYING) {
-                        reason = "Game belum mulai";
-                    } else if (current.isAiTurn && current.mode === GameMode.LIVE_VS_AI) {
-                        reason = "Giliran AI";
-                    } else if (cleanWord.length !== 5) {
-                        reason = "Harus 5 huruf";
-                    } else {
-                            const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
-                            isValid = result.valid;
-                            reason = result.error || '';
-                            entry = result.entry;
-                    }
-                    
-                    setLiveAttempts(prev => [...prev.slice(-19), {
-                        uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
-                        word: cleanWord, isValid, reason, timestamp: Date.now()
-                    }]);
-
-                    const canExecute = isValid && entry && current.gameState === GameState.PLAYING && 
-                        (!current.isAiTurn || current.mode === GameMode.LIVE_VS_NETIZEN);
-
-                    if (canExecute) {
-                        setLastWinner({ name: nickname || uniqueId, word: cleanWord });
-                        executeMove(entry!.word, 'chat', entry!.arti, entry!.bahasa, nickname || uniqueId, profilePictureUrl, uniqueId);
-                    }
+                if (event === 'chat' && data) {
+                    processChatData(data);
                 }
             } catch (e) {
                 console.error("Socket err", e);
             }
         };
 
-        socket.on('message', handleMessage);
+        // Bind events based on environment
+        socket.on('tiktokConnected', handleTikTokConnected);
+        socket.on('tiktokDisconnected', handleTikTokDisconnected);
+        socket.on('chat', handleChat);     // Cloud server
+        socket.on('message', handleLegacyMessage); // Legacy desktop connector
 
         return () => {
-            socket.off('message', handleMessage);
+            socket.off('tiktokConnected', handleTikTokConnected);
+            socket.off('tiktokDisconnected', handleTikTokDisconnected);
+            socket.off('chat', handleChat);
+            socket.off('message', handleLegacyMessage);
         };
-    }, [socket, isConnected, executeMove]); // Re-bind if socket changes
+    }, [socket, isConnected, executeMove, autoJoinStream, tiktokUsername, connectToStream]); 
 
     useEffect(() => {
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -599,6 +685,14 @@ export const LiveGame: React.FC<LiveGameProps> = ({
 
 
     const startGame = () => {
+        // If connecting to cloud server (checking by IP or if manually initiated connection is needed)
+        // For localhost (legacy), isStreamConnected might be true automatically if the desktop app is running
+        // But for cloud, user must have clicked 'Connect'
+        if (!isStreamConnected && serverIp.includes('railway.app')) {
+             alert("Harap sambungkan ke TikTok Live terlebih dahulu!");
+             return;
+        }
+
         if (mode === GameMode.LIVE_KNOCKOUT) {
             initKnockout(); // Reset to lobby
         } else {
@@ -632,34 +726,91 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         if (knockoutPhase === 'LOBBY') {
             return (
                 <div className="text-center space-y-6 relative w-full max-w-4xl mx-auto flex flex-col items-center">
-                    {/* Connection UI for Knockout */}
-                    {!isConnected && (
-                        <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 backdrop-blur-sm mb-6 max-w-md mx-auto relative z-30 w-full">
-                            <h3 className="text-indigo-400 font-bold mb-3 flex items-center justify-center gap-2"><Server size={18}/> KONEKSI SERVER LIVE</h3>
-                             <div className="flex gap-2">
-                                <input 
-                                    type="text" 
-                                    value={serverIp} 
-                                    onChange={(e) => setServerIp(e.target.value)} 
-                                    className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-center text-sm outline-none focus:border-indigo-500" 
-                                    placeholder="IP Address (ex: localhost)" 
-                                />
+                     {/* Connection UI for Knockout - REFACTORED */}
+                     {!isConnected && (
+                        <div className="bg-slate-800/90 p-4 rounded-xl border border-slate-700 backdrop-blur-sm mb-6 max-w-md mx-auto relative z-30 w-full shadow-xl">
+                            <h3 className="text-indigo-400 font-bold mb-4 flex items-center justify-center gap-2 tracking-wide"><Server size={18}/> KONEKSI SERVER LIVE</h3>
+                            
+                            {/* Tabs */}
+                            <div className="flex bg-slate-900/50 p-1 rounded-lg mb-4">
                                 <button 
-                                    onClick={connectSocket} 
+                                    onClick={() => setConnectionMode('cloud')}
+                                    className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${connectionMode === 'cloud' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                                >
+                                    <Cloud size={14} /> Cloud Server
+                                </button>
+                                <button 
+                                    onClick={() => setConnectionMode('local')}
+                                    className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${connectionMode === 'local' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                                >
+                                    <Laptop size={14} /> Localhost
+                                </button>
+                            </div>
+
+                            <div className="flex gap-2">
+                                {connectionMode === 'cloud' ? (
+                                    <input 
+                                        type="text" 
+                                        value={tiktokUsername} 
+                                        onChange={(e) => setTiktokUsername(e.target.value)} 
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-center text-sm outline-none focus:border-indigo-500 placeholder:text-slate-600" 
+                                        placeholder="@username_tiktok" 
+                                    />
+                                ) : (
+                                    <input 
+                                        type="text" 
+                                        value={serverIp} 
+                                        onChange={(e) => setServerIp(e.target.value)} 
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-center text-sm outline-none focus:border-indigo-500 placeholder:text-slate-600" 
+                                        placeholder="IP Address (ex: localhost)" 
+                                    />
+                                )}
+                                
+                                <button 
+                                    onClick={connectionMode === 'cloud' ? handleCloudConnect : handleLocalConnect} 
                                     disabled={isConnecting} 
                                     className={`px-4 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2 ${isConnecting ? 'bg-slate-600' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
                                 >
                                     {isConnecting ? <Loader2 size={16} className="animate-spin" /> : <Power size={16} />}
-                                    {isConnecting ? '...' : 'CONNECT'}
+                                    {isConnecting ? '...' : (connectionMode === 'cloud' ? 'MULAI' : 'CONNECT')}
                                 </button>
                             </div>
-                            <p className="text-[10px] text-slate-500 mt-2">Pastikan aplikasi TikTok Live Connector (IndoFinity) sudah berjalan.</p>
+                            
+                            <p className="text-[10px] text-slate-500 mt-2 italic">
+                                {connectionMode === 'cloud' 
+                                    ? '*Server Cloud: Otomatis terhubung ke Railway & TikTok Live.' 
+                                    : '*Localhost: Pastikan aplikasi TikTok Live Connector berjalan.'}
+                            </p>
                         </div>
                     )}
                     
-                    {isConnected && (
+                    {isConnected && !isStreamConnected && (
+                        <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 backdrop-blur-sm mb-6 max-w-md mx-auto relative z-30 w-full animate-pop-in">
+                            <h3 className="text-rose-400 font-bold mb-3 flex items-center justify-center gap-2"><Cast size={18}/> TARGET LIVE STREAM</h3>
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    value={tiktokUsername} 
+                                    onChange={(e) => setTiktokUsername(e.target.value)} 
+                                    className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-center text-sm outline-none focus:border-rose-500" 
+                                    placeholder="Username TikTok (contoh: @official.kpk)" 
+                                />
+                                <button 
+                                    onClick={connectToStream} 
+                                    disabled={streamConnecting || !tiktokUsername} 
+                                    className={`px-4 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2 ${streamConnecting ? 'bg-slate-600' : 'bg-rose-600 hover:bg-rose-500 text-white'}`}
+                                >
+                                    {streamConnecting ? <Loader2 size={16} className="animate-spin" /> : <Wifi size={16} />}
+                                    {streamConnecting ? '...' : 'JOIN'}
+                                </button>
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-2">*Wajib diisi jika menggunakan Cloud Server</p>
+                        </div>
+                    )}
+
+                    {isStreamConnected && (
                         <div className="bg-emerald-500/20 p-2 rounded-lg border border-emerald-500/50 mb-4 inline-block">
-                             <span className="text-emerald-300 font-bold text-sm flex items-center gap-2"><Wifi size={16}/> TERHUBUNG KE LIVE CHAT</span>
+                             <span className="text-emerald-300 font-bold text-sm flex items-center gap-2"><Wifi size={16}/> TERHUBUNG: {tiktokUsername || 'Localhost Stream'}</span>
                         </div>
                     )}
 
@@ -713,7 +864,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         </button>
                         <button 
                             onClick={startKnockoutTournament}
-                            disabled={lobbyPlayers.length < 8}
+                            disabled={lobbyPlayers.length < 8 || !isStreamConnected}
                             className="px-8 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:opacity-50 text-white rounded-xl font-bold text-xl shadow-lg transition-all"
                         >
                             MULAI
@@ -908,10 +1059,10 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         <Home size={14} />
                         <span>MENU</span>
                     </button>
-                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full border ${isConnected ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}>
-                        {isConnecting ? <Loader2 size={14} className="animate-spin" /> : (isConnected ? <Wifi size={14} className="text-emerald-400" /> : <WifiOff size={14} className="text-rose-500" />)}
-                        <span className={`text-[10px] font-bold ${isConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {isConnecting ? "CONNECTING..." : (isConnected ? "CONNECTED" : "DISCONNECTED")}
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full border ${isStreamConnected ? 'bg-emerald-500/10 border-emerald-500/30' : (isConnected ? 'bg-amber-500/10 border-amber-500/30' : 'bg-rose-500/10 border-rose-500/30')}`}>
+                        {isConnecting || streamConnecting ? <Loader2 size={14} className="animate-spin" /> : (isStreamConnected ? <Wifi size={14} className="text-emerald-400" /> : <WifiOff size={14} className={isConnected ? "text-amber-400" : "text-rose-500"} />)}
+                        <span className={`text-[10px] font-bold ${isStreamConnected ? 'text-emerald-400' : (isConnected ? 'text-amber-400' : 'text-rose-400')}`}>
+                            {isConnecting || streamConnecting ? "CONNECTING..." : (isStreamConnected ? "LIVE CONNECTED" : (isConnected ? "SERVER CONNECTED" : "DISCONNECTED"))}
                         </span>
                     </div>
                 </div>
@@ -938,24 +1089,113 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                     {mode === GameMode.LIVE_VS_NETIZEN ? <Swords size={48} className="text-amber-400" /> : <Users size={48} className="text-indigo-400" />}
                                 </div>
                                 <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400">
-                                    {mode === GameMode.LIVE_VS_NETIZEN ? "BATTLE ROYALE" : "VS AI BOT"}
+                                    {mode === GameMode.LIVE_VS_NETIZEN ? "BATTLE ROYALE" : "VS Teh AI"}
                                 </h1>
                                 
                                 {!isConnected ? (
                                     <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto">
-                                         <div className="w-full bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
-                                            <div className="flex justify-between items-center mb-1">
-                                                <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider flex items-center gap-1"><Globe size={10} /> IP Server</label>
+                                         <div className="w-full bg-slate-800/80 p-4 rounded-xl border border-slate-700/50 shadow-2xl backdrop-blur-sm">
+                                            <div className="flex justify-between items-center mb-4 pb-2 border-b border-white/5">
+                                                <label className="text-xs text-indigo-300 font-bold uppercase tracking-wider flex items-center gap-2"><Globe size={14} /> PENGATURAN KONEKSI</label>
                                             </div>
-                                            <input type="text" value={serverIp} onChange={(e) => setServerIp(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-center outline-none" placeholder="localhost" />
+                                            
+                                            {/* Connection Tabs */}
+                                            <div className="flex bg-slate-900/50 p-1 rounded-lg mb-4">
+                                                <button 
+                                                    onClick={() => setConnectionMode('cloud')}
+                                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${connectionMode === 'cloud' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                                                >
+                                                    <Cloud size={14} /> Cloud Server
+                                                </button>
+                                                <button 
+                                                    onClick={() => setConnectionMode('local')}
+                                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${connectionMode === 'local' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                                                >
+                                                    <Laptop size={14} /> Localhost
+                                                </button>
+                                            </div>
+
+                                            {/* Input Area based on Mode */}
+                                            <div className="space-y-3">
+                                                {connectionMode === 'cloud' ? (
+                                                    <div>
+                                                        <label className="text-[10px] text-slate-400 mb-1 block">Username TikTok</label>
+                                                        <div className="flex gap-2">
+                                                            <input 
+                                                                type="text" 
+                                                                value={tiktokUsername} 
+                                                                onChange={(e) => setTiktokUsername(e.target.value)} 
+                                                                className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-center outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-600" 
+                                                                placeholder="@username_tiktok" 
+                                                            />
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-500 mt-2 italic text-center">*Otomatis terhubung ke server cloud & stream.</p>
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <label className="text-[10px] text-slate-400 mb-1 block">IP Server Localhost</label>
+                                                        <div className="flex gap-2">
+                                                            <input 
+                                                                type="text" 
+                                                                value={serverIp} 
+                                                                onChange={(e) => setServerIp(e.target.value)} 
+                                                                className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2.5 text-white font-mono text-center outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-600" 
+                                                                placeholder="localhost:8081" 
+                                                            />
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-500 mt-2 italic text-center">*Pastikan aplikasi TikTok Live Connector berjalan.</p>
+                                                    </div>
+                                                )}
+
+                                                <button 
+                                                    onClick={connectionMode === 'cloud' ? handleCloudConnect : handleLocalConnect} 
+                                                    disabled={isConnecting} 
+                                                    className={`w-full px-6 py-3 rounded-lg font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${isConnecting ? 'bg-slate-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white transform hover:scale-[1.02] active:scale-95'}`}
+                                                >
+                                                    {isConnecting ? <Loader2 className="animate-spin" /> : <Power />} 
+                                                    {isConnecting ? 'MENGHUBUNGKAN...' : (connectionMode === 'cloud' ? 'MULAI' : 'HUBUNGKAN SERVER')}
+                                                </button>
+                                            </div>
                                         </div>
-                                        <button onClick={connectSocket} disabled={isConnecting} className={`w-full px-8 py-4 rounded-xl font-bold text-xl shadow-lg transition-all flex items-center justify-center gap-3 ${isConnecting ? 'bg-slate-600' : 'bg-sky-600 hover:bg-sky-500'}`}>
-                                            {isConnecting ? <Loader2 className="animate-spin" /> : <Server />} 
-                                            {isConnecting ? '...' : 'SAMBUNGKAN'}
-                                        </button>
+                                    </div>
+                                ) : !isStreamConnected ? (
+                                    <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto animate-pop-in">
+                                        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center mb-2 w-full flex flex-col items-center gap-2">
+                                            <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                                                <Server size={20} className="text-emerald-400" />
+                                            </div>
+                                            <div>
+                                                <p className="text-emerald-300 font-bold text-sm">Server Terhubung!</p>
+                                                <p className="text-slate-400 text-[10px]">{serverIp}</p>
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Only show this input if NOT auto-joining (i.e. Manual Localhost flow) */}
+                                        <div className="w-full bg-slate-800/80 p-4 rounded-xl border border-rose-500/50 shadow-xl backdrop-blur-sm">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <label className="text-xs text-rose-300 font-bold uppercase tracking-wider flex items-center gap-2"><Cast size={14} /> TARGET LIVE STREAM</label>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <input 
+                                                    type="text" 
+                                                    value={tiktokUsername} 
+                                                    onChange={(e) => setTiktokUsername(e.target.value)} 
+                                                    className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-center outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all placeholder:text-slate-600" 
+                                                    placeholder="@username" 
+                                                />
+                                                <button 
+                                                    onClick={connectToStream} 
+                                                    disabled={streamConnecting || !tiktokUsername} 
+                                                    className={`px-4 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2 ${streamConnecting ? 'bg-slate-600' : 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg'}`}
+                                                >
+                                                    {streamConnecting ? <Loader2 size={16} className="animate-spin" /> : <Wifi size={16} />}
+                                                    {streamConnecting ? '...' : 'JOIN'}
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 ) : (
-                                    <button onClick={startGame} className="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xl shadow-lg transform hover:scale-105 transition-all flex items-center gap-3 mx-auto">
+                                    <button onClick={startGame} className="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xl shadow-lg transform hover:scale-105 transition-all flex items-center gap-3 mx-auto animate-pop-in">
                                         <Play fill="currentColor" /> MULAI GAME
                                     </button>
                                 )}
@@ -970,7 +1210,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                             <div className="flex-1 w-full md:w-auto flex justify-between bg-black/40 backdrop-blur-sm border border-indigo-500/30 rounded-xl p-2 max-w-sm shadow-lg pointer-events-auto">
                                                 <div className="flex flex-col items-center">
                                                     <span className="text-3xl md:text-4xl font-black text-rose-400">{aiScore}</span>
-                                                    <span className="text-[10px] md:text-xs font-bold bg-rose-500/20 px-2 py-0.5 rounded text-rose-200">AI BOT</span>
+                                                    <span className="text-[10px] md:text-xs font-bold bg-rose-500/20 px-2 py-0.5 rounded text-rose-200">Teh AI</span>
                                                 </div>
                                                 <div className="flex flex-col items-center">
                                                     <span className="text-3xl md:text-4xl font-black text-emerald-400">{chatScore}</span>
@@ -1071,7 +1311,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                 {/* Right Panel: Live Feed */}
                 <div className="w-full md:w-80 border-l border-white/5 bg-black/20 backdrop-blur-md flex flex-col z-20 h-[30vh] md:h-auto border-t md:border-t-0 shrink-0">
                     <div className="p-3 bg-slate-900/80 border-b border-white/5 flex items-center justify-between">
-                        <span className="font-bold text-xs uppercase tracking-wider flex items-center gap-2"><MessageSquare size={14} /> Live Chat</span>
+                        <span className="font-bold text-xs uppercase tracking-wider flex items-center gap-2"><MessageSquare size={14} /> Live Chat {isStreamConnected ? <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"/> : <span className="w-2 h-2 rounded-full bg-rose-500"/>}</span>
                         <span className="text-[10px] bg-slate-700 px-2 py-0.5 rounded text-slate-300">io:2025</span>
                     </div>
                     <div className="flex-1 overflow-y-auto p-2 space-y-2 no-scrollbar" ref={scrollRef}>

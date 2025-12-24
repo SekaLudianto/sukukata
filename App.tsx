@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DictionaryEntry, GameSettings, GameState, TurnHistory, GameMode } from './types';
 import { getSyllableSuffix, findAIWord, validateUserWord, isValidDictionaryItem } from './utils/gameLogic';
+import { LiveGame } from './components/LiveGame';
 import { WordCard } from './components/WordCard';
 import { Timer } from './components/Timer';
-import { LiveGame } from './components/LiveGame';
-import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, BookOpen, Swords, Zap, Medal } from 'lucide-react';
+import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, Swords, Medal } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
 // --- Roasting Messages (AI Persona) ---
@@ -61,7 +61,13 @@ const App: React.FC = () => {
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
-    const [serverIp, setServerIp] = useState('localhost');
+    // Default to cloud URL provided by user
+    const [serverIp, setServerIp] = useState('buat-lev.up.railway.app');
+
+    // Live Game Persisted State
+    const [tiktokUsername, setTiktokUsername] = useState('');
+    const [isStreamConnected, setIsStreamConnected] = useState(false);
+    const [connectionMode, setConnectionMode] = useState<'cloud' | 'local'>('cloud');
 
     // Game Play State (Classic Mode)
     const [history, setHistory] = useState<TurnHistory[]>([]);
@@ -159,21 +165,52 @@ const App: React.FC = () => {
         
         setIsConnecting(true);
         try {
-            const connectionString = `http://${serverIp}:62025`;
-            const newSocket = io(connectionString, { transports: ['websocket', 'polling'] });
+            let connectionString;
+            
+            // Logic:
+            // 1. If it's a known cloud domain (Railway, Heroku), use HTTPS and no port (default 443).
+            // 2. If it's localhost, use the Legacy Desktop Connector port (62025) or custom if specified.
+            
+            if (serverIp.includes('railway.app') || serverIp.includes('herokuapp.com') || serverIp.includes('glitch.me')) {
+                // Cloud Server: Force HTTPS
+                const cleanIp = serverIp.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                connectionString = `https://${cleanIp}`;
+            } else {
+                // Localhost / Direct IP: Default to standard Connector port if not specified
+                // Remove protocol if exists
+                let cleanIp = serverIp.replace(/^http:\/\//, '');
+                
+                // If user didn't specify port, assume standard Desktop Connector port (62025)
+                if (!cleanIp.includes(':')) {
+                     connectionString = `http://${cleanIp}:62025`;
+                } else {
+                     connectionString = `http://${cleanIp}`;
+                }
+            }
+            
+            console.log("Connecting to:", connectionString);
+            
+            const newSocket = io(connectionString, { 
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5
+            });
 
             newSocket.on('connect', () => {
-                console.log('App: Terhubung ke IndoFinity Socket IO');
+                console.log('App: Terhubung ke Socket IO Server');
                 setIsConnected(true);
                 setIsConnecting(false);
             });
 
             newSocket.on('disconnect', () => {
+                console.log('App: Terputus dari Socket IO Server');
                 setIsConnected(false);
                 setIsConnecting(false);
+                setIsStreamConnected(false); // Also reset stream status on disconnect
             });
 
-            newSocket.on('connect_error', () => {
+            newSocket.on('connect_error', (err) => {
+                console.error('Connection Error:', err);
                 setIsConnected(false);
                 setIsConnecting(false);
             });
@@ -276,6 +313,13 @@ const App: React.FC = () => {
                 serverIp={serverIp}
                 setServerIp={setServerIp}
                 connectSocket={handleConnectSocket}
+                // Pass persisted state
+                tiktokUsername={tiktokUsername}
+                setTiktokUsername={setTiktokUsername}
+                isStreamConnected={isStreamConnected}
+                setIsStreamConnected={setIsStreamConnected}
+                connectionMode={connectionMode}
+                setConnectionMode={setConnectionMode}
             />
         );
     }
@@ -292,7 +336,7 @@ const App: React.FC = () => {
                             SukuKata.ai
                         </h1>
                         <p className="text-slate-400 text-sm md:text-lg">
-                            Duel sambung kata 5 huruf melawan Kecerdasan Buatan.
+                            Duel sambung kata 5 huruf melawan Teh AI.
                         </p>
                     </div>
 
