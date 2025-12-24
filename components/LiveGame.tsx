@@ -190,6 +190,20 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         }
     };
 
+    const clearLeaderboard = () => {
+        let storageKey = '';
+        if (mode === GameMode.LIVE_VS_NETIZEN) {
+            storageKey = 'sukukata_lb_battle';
+        } else if (mode === GameMode.LIVE_VS_AI) {
+            storageKey = 'sukukata_lb_coop';
+        }
+
+        if (storageKey && window.confirm("Hapus data leaderboard? Data tidak bisa dikembalikan.")) {
+            localStorage.removeItem(storageKey);
+            setLeaderboard([]);
+        }
+    };
+
     const startKnockoutTournament = () => {
         if (lobbyPlayers.length < 8) {
             alert("Butuh minimal 8 pemain untuk turnamen!");
@@ -361,16 +375,14 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         
         if (player === 'ai') {
              setIsAiTurn(false);
-             if (stateRef.current.history.length > 0 && currentMode === GameMode.LIVE_VS_AI) {
-                setAiScore(s => s + 1);
-             }
+             // UPDATE: Score for AI is now handled in endGame (when User fails)
         } else {
              // Chat move logic based on mode
              if (currentMode === GameMode.LIVE_VS_AI) {
-                setChatScore(s => s + 1);
+                // UPDATE: Score for Chat/Netizen is handled in endGame (when AI fails)
                 setIsAiTurn(true);
                 
-                // Track Individual Score for Co-op Mode too
+                // Track Individual MVP Score for Co-op Mode
                 if (winnerId && winnerName) {
                     setLeaderboard(prev => {
                         const existingIdx = prev.findIndex(p => p.uniqueId === winnerId);
@@ -394,26 +406,31 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         
                         newBoard.sort((a, b) => b.score - a.score);
                         const top5 = newBoard.slice(0, 5);
-                        localStorage.setItem('sukukata_lb_coop', JSON.stringify(top5));
+                        // Optional: save Co-op MVP to persistent storage if desired
+                        // localStorage.setItem('sukukata_lb_coop', JSON.stringify(top5)); 
                         return top5;
                     });
                 }
 
              } else if (currentMode === GameMode.LIVE_VS_NETIZEN && winnerId && winnerName) {
                 // Battle Royale Leaderboard Logic (Persistent)
-                setLeaderboard(prev => {
-                    const existingIdx = prev.findIndex(p => p.uniqueId === winnerId);
-                    let newBoard = [...prev];
+                try {
+                    const storedLbStr = localStorage.getItem('sukukata_lb_battle');
+                    let fullLb: LeaderboardEntry[] = storedLbStr ? JSON.parse(storedLbStr) : [];
+                    
+                    if (!Array.isArray(fullLb)) fullLb = [];
+
+                    const existingIdx = fullLb.findIndex(p => p.uniqueId === winnerId);
                     
                     if (existingIdx >= 0) {
-                        newBoard[existingIdx] = {
-                            ...newBoard[existingIdx],
-                            score: newBoard[existingIdx].score + 1,
+                        fullLb[existingIdx] = {
+                            ...fullLb[existingIdx],
+                            score: fullLb[existingIdx].score + 1,
                             nickname: winnerName,
-                            profilePictureUrl: winnerProfilePic || newBoard[existingIdx].profilePictureUrl
+                            profilePictureUrl: winnerProfilePic || fullLb[existingIdx].profilePictureUrl
                         };
                     } else {
-                        newBoard.push({
+                        fullLb.push({
                             uniqueId: winnerId,
                             nickname: winnerName,
                             profilePictureUrl: winnerProfilePic,
@@ -422,16 +439,17 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                     }
                     
                     // Sort descending by score
-                    newBoard.sort((a, b) => b.score - a.score);
+                    fullLb.sort((a, b) => b.score - a.score);
                     
-                    // Keep only Top 5
-                    const top5 = newBoard.slice(0, 5);
-
                     // Save to LocalStorage
-                    localStorage.setItem('sukukata_lb_battle', JSON.stringify(top5));
+                    localStorage.setItem('sukukata_lb_battle', JSON.stringify(fullLb));
                     
-                    return top5;
-                });
+                    // Update State with Top 5
+                    setLeaderboard(fullLb.slice(0, 5));
+                } catch (e) {
+                    console.error("Error updating BR leaderboard", e);
+                }
+
                 setIsAiTurn(false); 
              } else if (currentMode === GameMode.LIVE_KNOCKOUT && phase === 'BRACKET') {
                  // Knockout Logic: Turn Switching
@@ -454,10 +472,25 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         setIsAiTurn(false);
         setMatchStartCountdown(null); // Clear countdown if game ends
         
-        if (state === GameState.VICTORY) {
-            setRoastMessage(getRandomRoast('win'));
+        // --- SCORING LOGIC FOR VS AI ---
+        // Score is awarded to the WINNER of the round.
+        const currentMode = stateRef.current.mode;
+        if (currentMode === GameMode.LIVE_VS_AI) {
+            if (state === GameState.VICTORY) {
+                // Netizen wins (AI stuck or timeout)
+                setChatScore(s => s + 1);
+                setRoastMessage(getRandomRoast('win'));
+            } else {
+                // AI wins (Netizen stuck or timeout)
+                setAiScore(s => s + 1);
+                setRoastMessage(getRandomRoast('lose'));
+            }
         } else {
-            setRoastMessage(getRandomRoast('lose'));
+            if (state === GameState.VICTORY) {
+                setRoastMessage(getRandomRoast('win'));
+            } else {
+                setRoastMessage(getRandomRoast('lose'));
+            }
         }
     }, []);
 
@@ -700,8 +733,11 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             setGameState(GameState.PLAYING);
             setHistory([]);
             setUsedWords(new Set());
-            setAiScore(0);
-            setChatScore(0);
+            // SCORE UPDATE: Do not reset score for VS AI Mode so it accumulates.
+            if (mode !== GameMode.LIVE_VS_AI) {
+                setAiScore(0);
+                setChatScore(0);
+            }
             
             // Only reset leaderboard if NOT battle royale (Battle Royale accumulates score)
             // UPDATE: Also do not reset for LIVE_VS_AI so MVP can accumulate across rounds
@@ -721,7 +757,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const lastWord = history.length > 0 ? history[0] : null;
 
     // --- SUB-COMPONENT: Knockout View ---
-    const KnockoutView = () => {
+    const renderKnockoutView = () => {
         // ... (existing code for knockout view)
         if (knockoutPhase === 'LOBBY') {
             return (
@@ -883,13 +919,13 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                     {/* Left Column (QF 1 & 2) */}
                     <div className="flex flex-col gap-4 md:gap-8 w-1/5 min-w-[60px]">
                          {/* Match 0 */}
-                        <div className={`p-1 rounded border ${activeMatchIndex === 0 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                        <div className={`p-1 rounded border ${activeMatchIndex === 0 ? 'border-yellow-400 bg-yellow-400/20' : 'border-slate-600 bg-slate-800'}`}>
                             <div className={`p-0.5 truncate ${matches[0].winner?.uniqueId === matches[0].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p1?.nickname}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
                             <div className={`p-0.5 truncate ${matches[0].winner?.uniqueId === matches[0].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[0].p2?.nickname}</div>
                         </div>
                         {/* Match 1 */}
-                        <div className={`p-1 rounded border ${activeMatchIndex === 1 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                        <div className={`p-1 rounded border ${activeMatchIndex === 1 ? 'border-yellow-400 bg-yellow-400/20' : 'border-slate-600 bg-slate-800'}`}>
                             <div className={`p-0.5 truncate ${matches[1].winner?.uniqueId === matches[1].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p1?.nickname}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
                             <div className={`p-0.5 truncate ${matches[1].winner?.uniqueId === matches[1].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[1].p2?.nickname}</div>
@@ -898,7 +934,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
 
                     {/* Left Semifinal (Match 4) */}
                     <div className="flex flex-col justify-center w-1/5 min-w-[60px]">
-                         <div className={`p-1 rounded border ${activeMatchIndex === 4 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                         <div className={`p-1 rounded border ${activeMatchIndex === 4 ? 'border-yellow-400 bg-yellow-400/20' : 'border-slate-600 bg-slate-800'}`}>
                             <div className={`p-0.5 truncate ${matches[4].winner?.uniqueId === matches[4].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p1 ? matches[4].p1.nickname : '...'}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
                             <div className={`p-0.5 truncate ${matches[4].winner?.uniqueId === matches[4].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[4].p2 ? matches[4].p2.nickname : '...'}</div>
@@ -908,7 +944,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                     {/* Final (Match 6) & Center Arena */}
                     <div className="flex flex-col items-center justify-center w-1/5 min-w-[80px] gap-1 md:gap-2">
                         <div className="text-yellow-400 font-bold text-[10px] md:text-lg">FINAL</div>
-                        <div className={`w-full p-1 md:p-2 rounded-lg border-2 text-center ${activeMatchIndex === 6 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-500 bg-slate-900'}`}>
+                        <div className={`w-full p-1 md:p-2 rounded-lg border-2 text-center ${activeMatchIndex === 6 ? 'border-yellow-400 bg-yellow-400/20' : 'border-slate-500 bg-slate-900'}`}>
                              <div className={`font-bold truncate ${matches[6].winner?.uniqueId === matches[6].p1?.uniqueId ? 'text-green-400' : ''}`}>
                                  {matches[6].p1 ? matches[6].p1.nickname : '...'}
                              </div>
@@ -927,7 +963,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
 
                     {/* Right Semifinal (Match 5) */}
                     <div className="flex flex-col justify-center w-1/5 min-w-[60px]">
-                        <div className={`p-1 rounded border ${activeMatchIndex === 5 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                        <div className={`p-1 rounded border ${activeMatchIndex === 5 ? 'border-yellow-400 bg-yellow-400/20' : 'border-slate-600 bg-slate-800'}`}>
                             <div className={`p-0.5 truncate ${matches[5].winner?.uniqueId === matches[5].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p1 ? matches[5].p1.nickname : '...'}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
                             <div className={`p-0.5 truncate ${matches[5].winner?.uniqueId === matches[5].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[5].p2 ? matches[5].p2.nickname : '...'}</div>
@@ -937,13 +973,13 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                     {/* Right Column (QF 3 & 4) */}
                     <div className="flex flex-col gap-4 md:gap-8 w-1/5 min-w-[60px]">
                          {/* Match 2 */}
-                        <div className={`p-1 rounded border ${activeMatchIndex === 2 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                        <div className={`p-1 rounded border ${activeMatchIndex === 2 ? 'border-yellow-400 bg-yellow-400/20' : 'border-slate-600 bg-slate-800'}`}>
                             <div className={`p-0.5 truncate ${matches[2].winner?.uniqueId === matches[2].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p1?.nickname}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
                             <div className={`p-0.5 truncate ${matches[2].winner?.uniqueId === matches[2].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[2].p2?.nickname}</div>
                         </div>
                         {/* Match 3 */}
-                        <div className={`p-1 rounded border ${activeMatchIndex === 3 ? 'border-yellow-400 bg-yellow-400/20 animate-pulse' : 'border-slate-600 bg-slate-800'}`}>
+                        <div className={`p-1 rounded border ${activeMatchIndex === 3 ? 'border-yellow-400 bg-yellow-400/20' : 'border-slate-600 bg-slate-800'}`}>
                             <div className={`p-0.5 truncate ${matches[3].winner?.uniqueId === matches[3].p1?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p1?.nickname}</div>
                             <div className="h-px bg-slate-600 w-full"></div>
                             <div className={`p-0.5 truncate ${matches[3].winner?.uniqueId === matches[3].p2?.uniqueId ? 'text-green-400 font-bold' : ''}`}>{matches[3].p2?.nickname}</div>
@@ -994,7 +1030,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                              <div className={`text-right w-1/2 overflow-hidden transition-all duration-300 p-1 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
                                  <div className="font-bold text-sm md:text-lg truncate">{matches[activeMatchIndex].p1?.nickname}</div>
                                  {currentTurnPlayerId === matches[activeMatchIndex].p1?.uniqueId && (
-                                     <div className="text-[9px] md:text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
+                                     <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold mt-1">GILIRAN KAMU!</div>
                                  )}
                              </div>
                              
@@ -1007,7 +1043,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                              <div className={`text-left w-1/2 overflow-hidden transition-all duration-300 p-1 rounded-lg ${currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId ? 'bg-yellow-500/20 border border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)] scale-105' : 'opacity-60'}`}>
                                  <div className="font-bold text-sm md:text-lg truncate">{matches[activeMatchIndex].p2?.nickname}</div>
                                  {currentTurnPlayerId === matches[activeMatchIndex].p2?.uniqueId && (
-                                     <div className="text-[9px] md:text-[10px] text-yellow-300 animate-pulse font-bold mt-1">GILIRAN KAMU!</div>
+                                     <div className="text-[9px] md:text-[10px] text-yellow-300 font-bold mt-1">GILIRAN KAMU!</div>
                                  )}
                              </div>
                         </div>
@@ -1019,7 +1055,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                 {requiredPrefix}...
                             </div>
                         ) : (
-                             <div className="text-lg md:text-xl text-slate-400 mt-2 animate-pulse">Menunggu AI...</div>
+                             <div className="text-lg md:text-xl text-slate-400 mt-2">Menunggu AI...</div>
                         )}
 
                         <div className="mt-2">
@@ -1080,7 +1116,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                 <div className="flex-1 flex flex-col items-center justify-center relative z-10 p-4 overflow-y-auto scrollbar-hide">
                     {/* Render different views based on mode */}
                     {mode === GameMode.LIVE_KNOCKOUT ? (
-                        <KnockoutView />
+                        renderKnockoutView()
                     ) : (
                         /* Existing logic for VS AI / Battle Royale */
                         gameState === GameState.IDLE ? (
@@ -1089,7 +1125,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                     {mode === GameMode.LIVE_VS_NETIZEN ? <Swords size={48} className="text-amber-400" /> : <Users size={48} className="text-indigo-400" />}
                                 </div>
                                 <h1 className="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400">
-                                    {mode === GameMode.LIVE_VS_NETIZEN ? "BATTLE ROYALE" : "VS Teh AI"}
+                                    {mode === GameMode.LIVE_VS_NETIZEN ? "BATTLE ROYALE" : "VS AI BOT"}
                                 </h1>
                                 
                                 {!isConnected ? (
@@ -1210,7 +1246,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                             <div className="flex-1 w-full md:w-auto flex justify-between bg-black/40 backdrop-blur-sm border border-indigo-500/30 rounded-xl p-2 max-w-sm shadow-lg pointer-events-auto">
                                                 <div className="flex flex-col items-center">
                                                     <span className="text-3xl md:text-4xl font-black text-rose-400">{aiScore}</span>
-                                                    <span className="text-[10px] md:text-xs font-bold bg-rose-500/20 px-2 py-0.5 rounded text-rose-200">Teh AI</span>
+                                                    <span className="text-[10px] md:text-xs font-bold bg-rose-500/20 px-2 py-0.5 rounded text-rose-200">AI BOT</span>
                                                 </div>
                                                 <div className="flex flex-col items-center">
                                                     <span className="text-3xl md:text-4xl font-black text-emerald-400">{chatScore}</span>
@@ -1222,6 +1258,9 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                             <div className="w-full md:w-48 bg-black/40 backdrop-blur-sm border border-amber-500/30 rounded-xl p-2 pointer-events-auto">
                                                  <div className="flex items-center justify-between mb-1 pb-1 border-b border-white/10">
                                                     <div className="flex items-center gap-1 text-amber-400 font-bold text-[10px] uppercase tracking-widest"><Trophy size={10} /> Top 5 MVP</div>
+                                                    <button onClick={clearLeaderboard} className="text-slate-500 hover:text-rose-400 transition-colors" title="Hapus Data">
+                                                        <Trash2 size={10} />
+                                                    </button>
                                                 </div>
                                                 {leaderboard.slice(0, 5).map((player, idx) => (
                                                     <div key={player.uniqueId} className="flex items-center justify-between text-[10px] mb-1">
@@ -1241,7 +1280,12 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                             <div className="w-full max-w-sm bg-black/40 backdrop-blur-sm border border-amber-500/30 rounded-xl p-2 pointer-events-auto">
                                                 <div className="flex items-center justify-between mb-2 pb-1 border-b border-white/10">
                                                     <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-widest"><Trophy size={14} /> Top 5 Leaderboard</div>
-                                                    <span className="text-[10px] text-slate-400">Total Valid: {history.filter(h => h.player === 'chat').length}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[10px] text-slate-400">Total Valid: {history.filter(h => h.player === 'chat').length}</span>
+                                                        <button onClick={clearLeaderboard} className="text-slate-500 hover:text-rose-400 transition-colors" title="Hapus Data">
+                                                            <Trash2 size={12} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                                 {leaderboard.map((player, idx) => (
                                                     <div key={player.uniqueId} className="flex items-center justify-between text-xs mb-1">

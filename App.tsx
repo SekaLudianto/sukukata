@@ -336,7 +336,7 @@ const App: React.FC = () => {
                             SukuKata.ai
                         </h1>
                         <p className="text-slate-400 text-sm md:text-lg">
-                            Duel sambung kata 5 huruf melawan Teh AI.
+                            Duel sambung kata 5 huruf melawan Kecerdasan Buatan.
                         </p>
                     </div>
 
