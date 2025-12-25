@@ -5,26 +5,40 @@ import { DictionaryEntry } from "../types";
  * Kata dianggap layak jika memiliki vokal pada 3 huruf terakhirnya.
  * Ini untuk menghindari singkatan seperti RAPBN, PBB, dll yang mungkin lolos filter metadata.
  */
-export const isPlayableWord = (word: string): boolean => {
-    if (!word || word.length !== 5) return false;
+export const isPlayableWord = (word: string, targetLength: number = 5): boolean => {
+    if (!word || word.length !== targetLength) return false;
     
     const w = word.toUpperCase();
     const vowels = ['A', 'E', 'I', 'O', 'U'];
     
-    // Cek apakah ada vokal di indeks 2, 3, atau 4 (3 huruf terakhir)
-    // Contoh: RAPBN -> P(2), B(3), N(4) -> Tidak ada vokal -> False
-    // Contoh: BATUK -> T(2), U(3), K(4) -> Ada U -> True
-    return vowels.some(v => w[2] === v || w[3] === v || w[4] === v);
+    // Cek apakah ada vokal di 3 huruf terakhir (atau menyesuaikan panjang kata)
+    // Untuk kata pendek (<4), cek semua huruf. Untuk kata panjang, cek 3 terakhir.
+    const checkLimit = Math.min(3, targetLength);
+    let hasVowel = false;
+    
+    for (let i = 1; i <= checkLimit; i++) {
+        if (vowels.includes(w[targetLength - i])) {
+            hasVowel = true;
+            break;
+        }
+    }
+    
+    return hasVowel;
 };
 
 /**
  * Validasi item kamus secara menyeluruh.
  * Memeriksa struktur kata dan metadata (bahasa/jenis kata).
+ * Diubah agar menerima rentang panjang kata yang lebih luas (4-8 huruf) saat loading awal.
  */
 export const isValidDictionaryItem = (item: any): boolean => {
     // 1. Validasi bentuk data dasar
     if (!item || typeof item !== 'object') return false;
-    if (typeof item.word !== 'string' || item.word.length !== 5) return false;
+    if (typeof item.word !== 'string') return false;
+    
+    // Allow words between 4 and 8 characters for general dictionary loading
+    if (item.word.length < 4 || item.word.length > 8) return false;
+    
     if (!item.arti) return false;
 
     // 2. Filter berdasarkan metadata 'bahasa'
@@ -39,8 +53,8 @@ export const isValidDictionaryItem = (item: any): boolean => {
     }
 
     // 3. Filter berdasarkan struktur kata (Phonotactics)
-    // Memastikan kata memiliki vokal yang cukup untuk dipotong menjadi suku kata
-    return isPlayableWord(item.word);
+    // Gunakan panjang kata itu sendiri untuk validasi struktural
+    return isPlayableWord(item.word, item.word.length);
 };
 
 /**
@@ -106,9 +120,9 @@ export const getSyllableSuffix = (word: string): string => {
         }
     }
     
-    // Safety Net: Jika hasil suffix sama dengan kata utuh (untuk kata 5 huruf),
+    // Safety Net: Jika hasil suffix sama dengan kata utuh,
     // paksa ambil 3 huruf terakhir agar permainan tetap seru.
-    if (suffix.length === w.length && w.length === 5) {
+    if (suffix.length === w.length && w.length >= 3) {
         return w.slice(-3);
     }
 
@@ -118,18 +132,19 @@ export const getSyllableSuffix = (word: string): string => {
 export const findAIWord = (
     dictionary: DictionaryEntry[],
     requiredPrefix: string,
-    usedWords: Set<string>
+    usedWords: Set<string>,
+    targetLength: number = 5
 ): DictionaryEntry | null => {
     const prefix = requiredPrefix.toUpperCase();
     
     // Filter kata yang valid:
-    // 1. 5 Huruf
+    // 1. Sesuai Panjang Target
     // 2. Dimulai dengan prefix yang diminta
     // 3. Belum pernah dipakai
     const candidates = dictionary.filter(entry => {
         const w = entry.word.toUpperCase();
         return (
-            w.length === 5 &&
+            w.length === targetLength &&
             w.startsWith(prefix) &&
             !usedWords.has(w)
         );
@@ -148,13 +163,14 @@ export const validateUserWord = (
     word: string,
     dictionary: DictionaryEntry[],
     requiredPrefix: string | null,
-    usedWords: Set<string>
+    usedWords: Set<string>,
+    targetLength: number = 5
 ): { valid: boolean; error?: string; entry?: DictionaryEntry } => {
     const w = word.toUpperCase();
     
     // Cek Panjang
-    if (w.length !== 5) {
-        return { valid: false, error: "Harus 5 huruf pas!" };
+    if (w.length !== targetLength) {
+        return { valid: false, error: `Harus ${targetLength} huruf pas!` };
     }
 
     // Cek Prefix (jika bukan giliran pertama)

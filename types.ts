@@ -8,6 +8,7 @@ export interface DictionaryEntry {
 export interface GameSettings {
     timerSeconds: number;
     allowMockData: boolean;
+    wordLength: number;
 }
 
 export interface TurnHistory {

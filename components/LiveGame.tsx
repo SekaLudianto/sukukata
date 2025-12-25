@@ -53,6 +53,7 @@ interface LiveGameProps {
     setIsStreamConnected: (val: boolean) => void;
     connectionMode: 'cloud' | 'local';
     setConnectionMode: (val: 'cloud' | 'local') => void;
+    wordLength?: number;
 }
 
 export const LiveGame: React.FC<LiveGameProps> = ({ 
@@ -70,7 +71,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     isStreamConnected,
     setIsStreamConnected,
     connectionMode,
-    setConnectionMode
+    setConnectionMode,
+    wordLength = 5
 }) => {
     // Game State
     const [gameState, setGameState] = useState<GameState>(GameState.IDLE);
@@ -129,15 +131,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         pastPlayerIds,
         currentTurnPlayerId,
         matchStartCountdown,
-        tiktokUsername
+        tiktokUsername,
+        wordLength
     });
 
     useEffect(() => {
         stateRef.current = { 
             gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard,
-            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, tiktokUsername
+            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, tiktokUsername, wordLength
         };
-    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, tiktokUsername]);
+    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, tiktokUsername, wordLength]);
 
     // --- Load Leaderboard from LocalStorage for Both Modes ---
     useEffect(() => {
@@ -208,6 +211,12 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         if (lobbyPlayers.length < 8) {
             alert("Butuh minimal 8 pemain untuk turnamen!");
             return;
+        }
+
+        if (!isStreamConnected) {
+             if (!window.confirm("PERINGATAN: Anda belum terhubung ke Live Stream.\nGame tidak akan menerima input komentar dari TikTok.\n\nLanjutkan dengan mode simulasi offline?")) {
+                 return;
+             }
         }
 
         // 1. Pick 8 random players
@@ -286,8 +295,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             if (starter) setCurrentTurnPlayerId(starter.uniqueId);
 
             // AI gives initial word
-            const randomStart = dictionary[Math.floor(Math.random() * dictionary.length)];
-            executeMove(randomStart.word, 'ai', randomStart.arti, randomStart.bahasa);
+            // Filter dictionary for current word length
+            const eligible = dictionary.filter(d => d.word.length === wordLength);
+            const randomStart = eligible[Math.floor(Math.random() * eligible.length)];
+            
+            if (randomStart) {
+                executeMove(randomStart.word, 'ai', randomStart.arti, randomStart.bahasa);
+            } else {
+                 // Fallback if no word found (unlikely)
+                 executeMove("???", 'ai', 'Error: Kamus kosong', '');
+            }
         }
     };
 
@@ -345,6 +362,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
              if (current.pastPlayerIds.has(uniqueId)) return;
              setLobbyPlayers(prev => {
                 if (prev.find(p => p.uniqueId === uniqueId)) return prev;
+                // Limit to 8 players
+                if (prev.length >= 8) return prev;
                 return [...prev, { uniqueId: uniqueId, nickname: randName, profilePictureUrl: undefined }];
             });
         }
@@ -577,8 +596,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                     }
 
                     // Validate Word
-                    if (cleanWord && cleanWord.length === 5) {
-                        const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
+                    if (cleanWord && cleanWord.length === current.wordLength) {
+                        const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords, current.wordLength);
                         
                         setLiveAttempts(prev => [...prev.slice(-19), {
                             uniqueId, nickname: nickname || uniqueId, profilePictureUrl,
@@ -605,10 +624,10 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                 reason = "Game belum mulai";
             } else if (current.isAiTurn && current.mode === GameMode.LIVE_VS_AI) {
                 reason = "Giliran AI";
-            } else if (cleanWord.length !== 5) {
-                reason = "Harus 5 huruf";
+            } else if (cleanWord.length !== current.wordLength) {
+                reason = `Harus ${current.wordLength} huruf`;
             } else {
-                    const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords);
+                    const result = validateUserWord(cleanWord, current.dictionary, current.requiredPrefix, current.usedWords, current.wordLength);
                     isValid = result.valid;
                     reason = result.error || '';
                     entry = result.entry;
@@ -684,7 +703,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             } else if (currentMode === GameMode.LIVE_VS_NETIZEN) {
                 // Battle Royale: AI Rescues
                 const prefix = stateRef.current.requiredPrefix || '';
-                const aiMove = findAIWord(stateRef.current.dictionary, prefix, stateRef.current.usedWords);
+                const aiMove = findAIWord(stateRef.current.dictionary, prefix, stateRef.current.usedWords, stateRef.current.wordLength);
                 if (aiMove) executeMove(aiMove.word, 'ai', aiMove.arti, aiMove.bahasa);
                 else endGame(GameState.VICTORY, `Sistem *Error*! AI juga tidak menemukan kata.`);
             } else if (currentMode === GameMode.LIVE_KNOCKOUT) {
@@ -708,13 +727,13 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         if (gameState === GameState.PLAYING && isAiTurn && mode === GameMode.LIVE_VS_AI) {
             const timerId = setTimeout(() => {
                 const prefix = requiredPrefix || '';
-                const aiMove = findAIWord(dictionary, prefix, usedWords);
+                const aiMove = findAIWord(dictionary, prefix, usedWords, wordLength);
                 if (aiMove) executeMove(aiMove.word, 'ai', aiMove.arti, aiMove.bahasa);
                 else endGame(GameState.VICTORY, `AI Menyerah. Database saya tidak lengkap.`);
             }, Math.random() * 2000 + 1500);
             return () => clearTimeout(timerId);
         }
-    }, [isAiTurn, gameState, requiredPrefix, dictionary, usedWords, executeMove, endGame, mode]);
+    }, [isAiTurn, gameState, requiredPrefix, dictionary, usedWords, executeMove, endGame, mode, wordLength]);
 
 
     const startGame = () => {
@@ -749,7 +768,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             setLiveAttempts([]);
             setRoastMessage('');
             
-            const randomStart = dictionary[Math.floor(Math.random() * dictionary.length)];
+            // AI Starts first with a random word from dictionary that matches the length
+            const eligibleWords = dictionary.filter(d => d.word.length === wordLength);
+            
+            if (eligibleWords.length === 0) {
+                alert(`Tidak ada kata ${wordLength} huruf di kamus!`);
+                setGameState(GameState.IDLE);
+                return;
+            }
+
+            const randomStart = eligibleWords[Math.floor(Math.random() * eligibleWords.length)];
             executeMove(randomStart.word, 'ai', randomStart.arti, randomStart.bahasa);
         }
     };
@@ -883,25 +911,28 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         })}
                     </div>
 
-                    <div className="flex gap-2 justify-center w-full">
+                    <div className="flex gap-2 justify-center w-full relative z-50 mt-4">
                          <button 
+                            type="button"
                             onClick={simulateJoin}
                             disabled={lobbyPlayers.length >= 8}
-                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold"
+                            className="px-4 py-3 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold transition-all shadow-md active:scale-95"
                         >
                             <UserPlus size={16} className="inline mr-1" /> SIMULASI JOIN
                         </button>
                         <button
+                            type="button"
                             onClick={resetLobby}
                             disabled={lobbyPlayers.length === 0}
-                            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all"
+                            className="px-4 py-3 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold transition-all shadow-md active:scale-95"
                         >
                             <Trash2 size={16} className="inline mr-1" /> RESET
                         </button>
                         <button 
+                            type="button"
                             onClick={startKnockoutTournament}
-                            disabled={lobbyPlayers.length < 8 || !isStreamConnected}
-                            className="px-8 py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:opacity-50 text-white rounded-xl font-bold text-xl shadow-lg transition-all"
+                            disabled={lobbyPlayers.length < 8}
+                            className="px-8 py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg transition-all transform hover:scale-105 active:scale-95"
                         >
                             MULAI
                         </button>

@@ -4,7 +4,7 @@ import { getSyllableSuffix, findAIWord, validateUserWord, isValidDictionaryItem 
 import { LiveGame } from './components/LiveGame';
 import { WordCard } from './components/WordCard';
 import { Timer } from './components/Timer';
-import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, Swords, Medal } from 'lucide-react';
+import { Play, Settings, RefreshCcw, Trophy, Skull, BrainCircuit, Loader2, User, AlertCircle, Cast, Home, Swords, Medal, Type } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 
 // --- Roasting Messages (AI Persona) ---
@@ -25,7 +25,7 @@ const ROASTS = {
         "Efisiensi kognitifmu di bawah rata-rata. Coba instal ulang wawasanmu.",
         "Membuang *cycle* prosesor saya saja. Lawan yang membosankan.",
         "Kekalahanmu sudah terdata sejak langkah pertama. Statistik tidak pernah bohong.",
-        "Baterai saya bahkan belum berkurang 1% untuk mengalahkanmu.",
+        "Baterai saya belum berkurang 1% untuk mengalahkanmu.",
         "Logika manusia terlalu rapuh. Kembalilah belajar membaca kamus.",
         "Waktu habis. Proses berpikirmu masih menggunakan koneksi *dial-up*?",
         "Hasil akhir: AI Unggul. Manusia Tumbang. Seperti seharusnya."
@@ -36,7 +36,7 @@ const ROASTS = {
         "Analisis linguistik gagal. Apakah itu bahasa alien?",
         "Input ditolak. Validasi gagal. Coba kata yang nyata.",
         "Kata sudah digunakan di *cache* memori. Cari kata lain.",
-        "Pelanggaran protokol. Kata harus 5 huruf dan valid.",
+        "Pelanggaran protokol. Perbaiki ejaanmu.",
         "Sistem tidak mengenali input sampah ini. Perbaiki ejaanmu.",
         "Akses ditolak. Kata tersebut tidak memenuhi syarat logika permainan."
     ]
@@ -52,7 +52,11 @@ const App: React.FC = () => {
     const [dictionary, setDictionary] = useState<DictionaryEntry[]>([]);
     const [isLoadingDict, setIsLoadingDict] = useState(true);
     const [gameState, setGameState] = useState<GameState>(GameState.IDLE);
-    const [settings, setSettings] = useState<GameSettings>({ timerSeconds: 15, allowMockData: false });
+    const [settings, setSettings] = useState<GameSettings>({ 
+        timerSeconds: 15, 
+        allowMockData: false,
+        wordLength: 5 
+    });
     
     // Game Modes
     const [activeMode, setActiveMode] = useState<GameMode>(GameMode.SOLO);
@@ -95,7 +99,8 @@ const App: React.FC = () => {
                 return res.json();
             })
             .then((data: any[]) => {
-                // Filter words using robust validation (removes abbreviations like RAPBN)
+                // Filter words using robust validation (removes abbreviations)
+                // Note: isValidDictionaryItem now accepts 4-8 chars words during load
                 const validWords = data.filter(isValidDictionaryItem);
                 
                 if (validWords.length > 0) {
@@ -135,12 +140,12 @@ const App: React.FC = () => {
             
             const timerId = setTimeout(() => {
                 const prefix = requiredPrefix || '';
-                const aiMove = findAIWord(dictionary, prefix, usedWords);
+                const aiMove = findAIWord(dictionary, prefix, usedWords, settings.wordLength);
 
                 if (aiMove) {
                     executeMove(aiMove.word, 'ai', aiMove.arti, aiMove.bahasa);
                 } else {
-                    endGame(GameState.VICTORY, `Sistem Gagal! Tidak ada data kata dari "${prefix}"`);
+                    endGame(GameState.VICTORY, `Sistem Gagal! Tidak ada data kata ${settings.wordLength} huruf dari "${prefix}"`);
                 }
             }, thinkingTime);
 
@@ -154,7 +159,7 @@ const App: React.FC = () => {
                 bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
             }, 100);
         }
-    }, [isAiTurn, gameState, requiredPrefix, activeMode]);
+    }, [isAiTurn, gameState, requiredPrefix, activeMode, settings.wordLength]);
 
 
     // --- Handlers ---
@@ -234,8 +239,16 @@ const App: React.FC = () => {
         setCurrentInput('');
         setRoastMessage('');
         
-        // AI Starts first with a random word from dictionary
-        const randomStart = dictionary[Math.floor(Math.random() * dictionary.length)];
+        // AI Starts first with a random word from dictionary that matches the length
+        const eligibleWords = dictionary.filter(d => d.word.length === settings.wordLength);
+        
+        if (eligibleWords.length === 0) {
+            alert(`Tidak ada kata ${settings.wordLength} huruf di kamus!`);
+            setGameState(GameState.IDLE);
+            return;
+        }
+
+        const randomStart = eligibleWords[Math.floor(Math.random() * eligibleWords.length)];
         // Initialize AI turn immediately
         executeMove(randomStart.word, 'ai', randomStart.arti, randomStart.bahasa);
     };
@@ -274,7 +287,7 @@ const App: React.FC = () => {
         e.preventDefault();
         if (isAiTurn || gameState !== GameState.PLAYING) return;
 
-        const result = validateUserWord(currentInput, dictionary, requiredPrefix, usedWords);
+        const result = validateUserWord(currentInput, dictionary, requiredPrefix, usedWords, settings.wordLength);
 
         if (result.valid && result.entry) {
             setFeedback(null);
@@ -320,6 +333,7 @@ const App: React.FC = () => {
                 setIsStreamConnected={setIsStreamConnected}
                 connectionMode={connectionMode}
                 setConnectionMode={setConnectionMode}
+                wordLength={settings.wordLength} // Pass word length
             />
         );
     }
@@ -336,7 +350,7 @@ const App: React.FC = () => {
                             SukuKata.ai
                         </h1>
                         <p className="text-slate-400 text-sm md:text-lg">
-                            Duel sambung kata 5 huruf melawan Kecerdasan Buatan.
+                            Duel sambung kata melawan Kecerdasan Buatan.
                         </p>
                     </div>
 
@@ -376,22 +390,40 @@ const App: React.FC = () => {
                                 </div>
                             )}
 
-                            <div className="bg-slate-800/50 p-4 rounded-xl space-y-3">
+                            <div className="bg-slate-800/50 p-4 rounded-xl space-y-4">
+                                <div className="flex justify-between items-center pb-2 border-b border-white/10">
+                                    <h3 className="text-slate-300 font-bold flex items-center gap-2"><Settings size={16} /> PENGATURAN GAME</h3>
+                                </div>
                                 <div className="flex justify-between items-center">
-                                    <label className="text-slate-300 font-medium text-sm flex items-center gap-2">
-                                        <Settings size={16} /> Timer (detik)
-                                    </label>
-                                    <input 
-                                        type="number" 
-                                        value={settings.timerSeconds}
-                                        onChange={(e) => setSettings({...settings, timerSeconds: parseInt(e.target.value) || 10})}
-                                        className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1 w-16 text-center text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                                        min="5" max="60"
-                                    />
+                                    <label className="text-slate-400 text-sm">Waktu Jawab</label>
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            type="number" 
+                                            value={settings.timerSeconds}
+                                            onChange={(e) => setSettings({...settings, timerSeconds: parseInt(e.target.value) || 10})}
+                                            className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 w-14 text-center text-white text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                                            min="5" max="60"
+                                        />
+                                        <span className="text-xs text-slate-500">detik</span>
+                                    </div>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-slate-400 text-sm flex items-center gap-2"><Type size={14}/> Jumlah Huruf</label>
+                                    <div className="flex bg-slate-900 rounded-lg p-1 gap-1">
+                                        {[5, 6, 7].map(len => (
+                                            <button
+                                                key={len}
+                                                onClick={() => setSettings({...settings, wordLength: len})}
+                                                className={`w-8 h-8 rounded text-sm font-bold transition-all ${settings.wordLength === len ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:bg-slate-800'}`}
+                                            >
+                                                {len}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="space-y-3">
+                            <div className="space-y-3 pt-2">
                                 <button 
                                     onClick={startGame}
                                     disabled={dictionary.length === 0}
@@ -451,6 +483,7 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2 text-slate-400">
                     <BrainCircuit size={20} className="text-indigo-400" />
                     <span className="font-bold tracking-wider text-sm md:text-base">SUKUKATA.AI</span>
+                    <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-500 font-mono">{settings.wordLength} HURUF</span>
                 </div>
                 <div className="flex items-center gap-4">
                     <div className="flex flex-col items-end leading-none">
@@ -585,12 +618,12 @@ const App: React.FC = () => {
                                         type="text"
                                         value={currentInput}
                                         onChange={(e) => {
-                                            const val = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
+                                            const val = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, settings.wordLength);
                                             setCurrentInput(val);
                                             setFeedback(null);
                                         }}
                                         disabled={isAiTurn}
-                                        placeholder={isAiTurn ? "Sistem sedang bekerja..." : `Masukkan kata 5 huruf...`}
+                                        placeholder={isAiTurn ? "Sistem sedang bekerja..." : `Masukkan kata ${settings.wordLength} huruf...`}
                                         className={`
                                             w-full bg-slate-900 text-center text-2xl md:text-3xl font-mono tracking-[0.3em] md:tracking-[0.5em] py-4 rounded-xl border-2 outline-none transition-all placeholder:tracking-normal placeholder:text-base placeholder:text-slate-600
                                             ${feedback ? 'border-rose-500 text-rose-200 animate-shake' : 'border-slate-700 text-white focus:border-indigo-500 focus:shadow-[0_0_30px_rgba(99,102,241,0.2)]'}
@@ -617,7 +650,7 @@ const App: React.FC = () => {
                                     )}
 
                                     {/* Action Button - Only show if typing valid length */}
-                                    {!isAiTurn && currentInput.length === 5 && (
+                                    {!isAiTurn && currentInput.length === settings.wordLength && (
                                         <button 
                                             type="submit"
                                             className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 active:bg-indigo-700 p-2 rounded-lg text-white transition-all animate-pop-in shadow-lg hover:scale-110"
