@@ -424,10 +424,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         }
                         
                         newBoard.sort((a, b) => b.score - a.score);
-                        const top5 = newBoard.slice(0, 5);
-                        // Optional: save Co-op MVP to persistent storage if desired
-                        // localStorage.setItem('sukukata_lb_coop', JSON.stringify(top5)); 
-                        return top5;
+                        // FIX: Keep full board in state, do not slice here
+                        return newBoard;
                     });
                 }
 
@@ -463,8 +461,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                     // Save to LocalStorage
                     localStorage.setItem('sukukata_lb_battle', JSON.stringify(fullLb));
                     
-                    // Update State with Top 5
-                    setLeaderboard(fullLb.slice(0, 5));
+                    // Update State with Full Board (Fix: do not slice here)
+                    setLeaderboard(fullLb);
                 } catch (e) {
                     console.error("Error updating BR leaderboard", e);
                 }
@@ -1318,7 +1316,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                                         </button>
                                                     </div>
                                                 </div>
-                                                {leaderboard.map((player, idx) => (
+                                                {leaderboard.slice(0, 5).map((player, idx) => (
                                                     <div key={player.uniqueId} className="flex items-center justify-between text-xs mb-1">
                                                         <div className="flex items-center gap-2">
                                                             {idx === 0 && <Crown size={12} className="text-yellow-400" />}
