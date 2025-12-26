@@ -3,7 +3,7 @@ import { DictionaryEntry, GameState, TurnHistory, LiveAttempt, GameMode, Leaderb
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull, Bot, Trash2, Cast, Laptop, Cloud } from 'lucide-react';
+import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull, Bot, Trash2, Cast, Laptop, Cloud, Hand, Gift } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 
 // --- Varied Roasts for Live Game (AI Persona) ---
@@ -103,6 +103,9 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const [lobbyPlayers, setLobbyPlayers] = useState<KnockoutPlayer[]>([]);
     const [pastPlayerIds, setPastPlayerIds] = useState<Set<string>>(new Set());
     
+    // Tracking Likes for Entry
+    const playerLikesRef = useRef<Record<string, number>>({});
+    
     const [matches, setMatches] = useState<KnockoutMatch[]>([]);
     const [activeMatchIndex, setActiveMatchIndex] = useState<number | null>(null);
     const [knockoutChampion, setKnockoutChampion] = useState<KnockoutPlayer | null>(null);
@@ -184,12 +187,14 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         setHistory([]);
         setCurrentTurnPlayerId(null);
         setMatchStartCountdown(null);
+        playerLikesRef.current = {}; // Reset like tracking
     };
 
     const resetLobby = () => {
         if (window.confirm("Apakah Anda yakin ingin mereset lobby? Semua pemain akan dihapus.")) {
             setLobbyPlayers([]);
             setPastPlayerIds(new Set()); // Clear history so they can join again
+            playerLikesRef.current = {};
         }
     };
 
@@ -561,6 +566,63 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             setStreamConnecting(false);
         };
 
+        // NEW: Handle Likes for Knockout Join
+        const handleLike = (data: any) => {
+            const current = stateRef.current;
+            // Only process likes for joining in Lobby phase of Knockout mode
+            if (current.mode === GameMode.LIVE_KNOCKOUT && current.knockoutPhase === 'LOBBY') {
+                 const { uniqueId, nickname, profilePictureUrl, likeCount } = data;
+                 
+                 // Skip if already played
+                 if (current.pastPlayerIds.has(uniqueId)) return;
+                 // Skip if already in lobby
+                 if (current.lobbyPlayers.find(p => p.uniqueId === uniqueId)) return;
+                 // Skip if lobby full
+                 if (current.lobbyPlayers.length >= 8) return;
+
+                 // Accumulate likes
+                 const currentLikes = playerLikesRef.current[uniqueId] || 0;
+                 const newLikes = currentLikes + (likeCount || 0);
+                 playerLikesRef.current[uniqueId] = newLikes;
+
+                 // Check threshold (50 likes)
+                 if (newLikes >= 50) {
+                     setLobbyPlayers(prev => {
+                        if (prev.find(p => p.uniqueId === uniqueId)) return prev;
+                        if (prev.length >= 8) return prev;
+                        return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
+                    });
+                 }
+            }
+        };
+
+        // NEW: Handle Gifts for Knockout Join (VIP Entry)
+        const handleGift = (data: any) => {
+            const current = stateRef.current;
+            // Only process gifts for joining in Lobby phase of Knockout mode
+            if (current.mode === GameMode.LIVE_KNOCKOUT && current.knockoutPhase === 'LOBBY') {
+                 const { uniqueId, nickname, profilePictureUrl, diamondCount, giftName } = data;
+                 
+                 // Skip if already played
+                 if (current.pastPlayerIds.has(uniqueId)) return;
+                 // Skip if already in lobby
+                 if (current.lobbyPlayers.find(p => p.uniqueId === uniqueId)) return;
+                 // Skip if lobby full
+                 if (current.lobbyPlayers.length >= 8) return;
+                 
+                 // Entry condition: Any gift worth >= 1 coin OR specific gift names like "Rose"
+                 // Note: giftName check depends on actual payload, usually safe to check diamondCount > 0
+                 if ((diamondCount && diamondCount >= 1) || giftName === 'Rose' || giftName === 'Mawar') {
+                      setLobbyPlayers(prev => {
+                        if (prev.find(p => p.uniqueId === uniqueId)) return prev;
+                        if (prev.length >= 8) return prev;
+                        return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
+                    });
+                 }
+            }
+        };
+
+
         // 2. Chat Events (Main Game Logic)
         const processChatData = (data: any) => {
              // Data structure: { uniqueId, nickname, profilePictureUrl, comment, ... }
@@ -571,21 +633,6 @@ export const LiveGame: React.FC<LiveGameProps> = ({
 
             // --- MODE: LIVE KNOCKOUT LOGIC ---
             if (current.mode === GameMode.LIVE_KNOCKOUT) {
-                // Lobby Phase
-                if (current.knockoutPhase === 'LOBBY') {
-                    if (cleanWord === 'JOIN' || cleanWord === 'IKUT') {
-                        if (current.pastPlayerIds.has(uniqueId)) return;
-                        setLobbyPlayers(prev => {
-                            // Prevent duplicate join
-                            if (prev.find(p => p.uniqueId === uniqueId)) return prev;
-                            // Limit to 8 players
-                            if (prev.length >= 8) return prev;
-                            return [...prev, { uniqueId, nickname: nickname || uniqueId, profilePictureUrl }];
-                        });
-                    }
-                    return;
-                }
-
                 // Match Phase - only process inputs if playing
                 if (current.knockoutPhase === 'BRACKET' && current.gameState === GameState.PLAYING && current.activeMatchIndex !== null) {
                     // STRICT TURN ENFORCEMENT
@@ -663,6 +710,10 @@ export const LiveGame: React.FC<LiveGameProps> = ({
 
                 if (event === 'chat' && data) {
                     processChatData(data);
+                } else if (event === 'like' && data) {
+                    handleLike(data);
+                } else if (event === 'gift' && data) {
+                    handleGift(data);
                 }
             } catch (e) {
                 console.error("Socket err", e);
@@ -673,12 +724,16 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         socket.on('tiktokConnected', handleTikTokConnected);
         socket.on('tiktokDisconnected', handleTikTokDisconnected);
         socket.on('chat', handleChat);     // Cloud server
+        socket.on('like', handleLike);     // Cloud server
+        socket.on('gift', handleGift);     // Cloud server
         socket.on('message', handleLegacyMessage); // Legacy desktop connector
 
         return () => {
             socket.off('tiktokConnected', handleTikTokConnected);
             socket.off('tiktokDisconnected', handleTikTokDisconnected);
             socket.off('chat', handleChat);
+            socket.off('like', handleLike);
+            socket.off('gift', handleGift);
             socket.off('message', handleLegacyMessage);
         };
     }, [socket, isConnected, executeMove, autoJoinStream, tiktokUsername, connectToStream]); 
@@ -878,9 +933,19 @@ export const LiveGame: React.FC<LiveGameProps> = ({
 
                     <div className="p-4 border-2 border-purple-500/50 bg-purple-900/20 rounded-2xl animate-pulse w-full max-w-md">
                         <h2 className="text-2xl font-bold text-purple-300 mb-2">LOBBY TURNAMEN</h2>
-                        <p className="text-white text-lg">Ketik <span className="font-mono bg-white text-purple-900 px-2 rounded">JOIN</span> di komentar!</p>
+                        <div className="flex flex-col items-center gap-2 text-white">
+                            <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-lg">
+                                <Hand size={20} className="text-yellow-400" />
+                                <span>Tap Layar <b>50x</b></span>
+                            </div>
+                            <span className="text-xs text-slate-400">- ATAU -</span>
+                            <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-lg">
+                                <Gift size={20} className="text-rose-400" />
+                                <span>Kirim Gift (Mawar / 1 Koin)</span>
+                            </div>
+                            <p className="text-lg font-bold text-emerald-400 mt-1">UNTUK JOIN!</p>
+                        </div>
                         <p className="text-sm text-slate-400 mt-2">Peserta: {lobbyPlayers.length} / 8</p>
-                        <p className="text-xs text-rose-400 italic">Pemain sebelumnya tidak bisa ikut.</p>
                     </div>
                     
                     <div className="grid grid-cols-4 gap-2 max-w-lg mx-auto w-full">
