@@ -586,7 +586,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                  playerLikesRef.current[uniqueId] = newLikes;
 
                  // Check threshold (50 likes)
-                 if (newLikes >= 50) {
+                 if (newLikes >= 20) {
                      setLobbyPlayers(prev => {
                         if (prev.find(p => p.uniqueId === uniqueId)) return prev;
                         if (prev.length >= 8) return prev;
@@ -936,7 +936,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         <div className="flex flex-col items-center gap-2 text-white">
                             <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-lg">
                                 <Hand size={20} className="text-yellow-400" />
-                                <span>Tap Layar <b>50x</b></span>
+                                <span>Tap Layar <b>20x</b></span>
                             </div>
                             <span className="text-xs text-slate-400">- ATAU -</span>
                             <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-lg">
