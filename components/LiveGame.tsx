@@ -653,7 +653,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                  playerLikesRef.current[uniqueId] = newLikes;
 
                  // Check threshold (50 likes)
-                 if (newLikes >= 50) {
+                 if (newLikes >= 20) {
                      setLobbyPlayers(prev => {
                         if (prev.find(p => p.uniqueId === uniqueId)) return prev;
                         if (prev.length >= 8) return prev;
