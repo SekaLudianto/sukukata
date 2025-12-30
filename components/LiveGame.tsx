@@ -3,7 +3,7 @@ import { DictionaryEntry, GameState, TurnHistory, LiveAttempt, GameMode, Leaderb
 import { getSyllableSuffix, findAIWord, validateUserWord } from '../utils/gameLogic';
 import { WordCard } from './WordCard';
 import { Timer } from './Timer';
-import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull, Bot, Trash2, Cast, Laptop, Cloud, Hand, Gift } from 'lucide-react';
+import { Play, Power, MessageSquare, Users, Trophy, Wifi, WifiOff, Home, Loader2, Server, User, Swords, Crown, UserPlus, ArrowRightLeft, Globe, Clock, Star, Skull, Bot, Trash2, Cast, Laptop, Cloud, Hand, Gift, Zap, RotateCcw, Plus, Hourglass, ShieldAlert } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 
 // --- Varied Roasts for Live Game (AI Persona) ---
@@ -56,6 +56,13 @@ interface LiveGameProps {
     wordLength?: number;
 }
 
+interface BatchCandidate {
+    entry: DictionaryEntry;
+    uniqueId: string;
+    nickname: string;
+    profilePictureUrl?: string;
+}
+
 export const LiveGame: React.FC<LiveGameProps> = ({ 
     dictionary, 
     onBack, 
@@ -82,28 +89,31 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const [timeLeft, setTimeLeft] = useState(0);
     const [isAiTurn, setIsAiTurn] = useState(false);
     
-    // Auto join flag - local state is fine here as it's a transient action
+    // Auto join flag
     const [autoJoinStream, setAutoJoinStream] = useState(false);
 
-    // Scores & Leaderboard (Modes other than Knockout)
+    // Scores & Leaderboard
     const [aiScore, setAiScore] = useState(0);
     const [chatScore, setChatScore] = useState(0);
     const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
     // Live Specific State
     const [liveAttempts, setLiveAttempts] = useState<LiveAttempt[]>([]);
-    const [lastWinner, setLastWinner] = useState<{name: string, word: string} | null>(null);
+    const [lastWinner, setLastWinner] = useState<{name: string, word: string, id: string} | null>(null);
     const [gameOverReason, setGameOverReason] = useState('');
     const [roastMessage, setRoastMessage] = useState('');
-    // tiktokUsername and isStreamConnected are now props
     const [streamConnecting, setStreamConnecting] = useState(false);
+    
+    // Fairness Mechanism State
+    const [isCollectingAnswers, setIsCollectingAnswers] = useState(false);
+    const batchCandidatesRef = useRef<BatchCandidate[]>([]);
     
     // Knockout Specific State
     const [knockoutPlayers, setKnockoutPlayers] = useState<KnockoutPlayer[]>([]);
     const [lobbyPlayers, setLobbyPlayers] = useState<KnockoutPlayer[]>([]);
     const [pastPlayerIds, setPastPlayerIds] = useState<Set<string>>(new Set());
+    const [pastPlayers, setPastPlayers] = useState<KnockoutPlayer[]>([]); 
     
-    // Tracking Likes for Entry
     const playerLikesRef = useRef<Record<string, number>>({});
     
     const [matches, setMatches] = useState<KnockoutMatch[]>([]);
@@ -112,8 +122,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const [knockoutPhase, setKnockoutPhase] = useState<'LOBBY' | 'BRACKET' | 'FINISHED'>('LOBBY');
     const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState<string | null>(null);
     
-    // New State for Knockout Flow Control
     const [matchStartCountdown, setMatchStartCountdown] = useState<number | null>(null);
+    const [autoRestartCountdown, setAutoRestartCountdown] = useState<number | null>(null);
 
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -134,16 +144,19 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         pastPlayerIds,
         currentTurnPlayerId,
         matchStartCountdown,
+        autoRestartCountdown,
         tiktokUsername,
-        wordLength
+        wordLength,
+        isCollectingAnswers,
+        lastWinner
     });
 
     useEffect(() => {
         stateRef.current = { 
             gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard,
-            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, tiktokUsername, wordLength
+            knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, autoRestartCountdown, tiktokUsername, wordLength, isCollectingAnswers, lastWinner
         };
-    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, tiktokUsername, wordLength]);
+    }, [gameState, isAiTurn, requiredPrefix, usedWords, dictionary, history, mode, leaderboard, knockoutPhase, activeMatchIndex, matches, lobbyPlayers, pastPlayerIds, currentTurnPlayerId, matchStartCountdown, autoRestartCountdown, tiktokUsername, wordLength, isCollectingAnswers, lastWinner]);
 
     // --- Load Leaderboard from LocalStorage for Both Modes ---
     useEffect(() => {
@@ -193,9 +206,30 @@ export const LiveGame: React.FC<LiveGameProps> = ({
     const resetLobby = () => {
         if (window.confirm("Apakah Anda yakin ingin mereset lobby? Semua pemain akan dihapus.")) {
             setLobbyPlayers([]);
-            setPastPlayerIds(new Set()); // Clear history so they can join again
+            // Don't clear pastPlayerIds here if you want to keep 'ban' list, 
+            // OR clear it if you want fresh start. 
+            // Usually for "Reset Lobby" we want to clear current candidates but keep history.
+            // But if admin wants to force clear everything:
+            // setPastPlayerIds(new Set()); 
             playerLikesRef.current = {};
         }
+    };
+
+    const invitePastPlayer = (player: KnockoutPlayer) => {
+        if (lobbyPlayers.length >= 8) return;
+        
+        // Add to lobby
+        setLobbyPlayers(prev => {
+            if (prev.find(p => p.uniqueId === player.uniqueId)) return prev;
+            return [...prev, player];
+        });
+
+        // Unmark from past players so they aren't blocked
+        setPastPlayerIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(player.uniqueId);
+            return newSet;
+        });
     };
 
     const clearLeaderboard = () => {
@@ -229,14 +263,26 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         const selected = shuffled.slice(0, 8);
         setKnockoutPlayers(selected);
 
-        // 2. Mark them as 'played' so they can't join next session
+        // 2. Mark them as 'played' so they can't join next session automatically
         setPastPlayerIds(prev => {
             const newSet = new Set(prev);
             selected.forEach(p => newSet.add(p.uniqueId));
             return newSet;
         });
 
-        // 3. Create Bracket Structure
+        // 3. Save to Past Players History (for manual invite later)
+        setPastPlayers(prev => {
+            const newHistory = [...prev];
+            selected.forEach(p => {
+                if (!newHistory.find(h => h.uniqueId === p.uniqueId)) {
+                    newHistory.push(p);
+                }
+            });
+            // Keep last 32 players
+            return newHistory.slice(-32);
+        });
+
+        // 4. Create Bracket Structure
         const initialMatches: KnockoutMatch[] = [
             // Quarter Finals (Left Side)
             { id: 0, p1: selected[0], p2: selected[1], winner: null, nextMatchId: 4 },
@@ -284,6 +330,20 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         }
         return () => clearInterval(interval);
     }, [matchStartCountdown, knockoutPhase]);
+
+    // Auto Restart Effect for VS Netizen / VS AI
+    useEffect(() => {
+        let interval: number;
+        if (autoRestartCountdown !== null && autoRestartCountdown > 0) {
+            interval = window.setInterval(() => {
+                setAutoRestartCountdown(prev => (prev !== null ? prev - 1 : null));
+            }, 1000);
+        } else if (autoRestartCountdown === 0) {
+            setAutoRestartCountdown(null);
+            startGame();
+        }
+        return () => clearInterval(interval);
+    }, [autoRestartCountdown]);
 
 
     const runMatch = () => {
@@ -494,9 +554,9 @@ export const LiveGame: React.FC<LiveGameProps> = ({
         setIsAiTurn(false);
         setMatchStartCountdown(null); // Clear countdown if game ends
         
-        // --- SCORING LOGIC FOR VS AI ---
-        // Score is awarded to the WINNER of the round.
         const currentMode = stateRef.current.mode;
+        
+        // --- SCORING LOGIC FOR VS AI ---
         if (currentMode === GameMode.LIVE_VS_AI) {
             if (state === GameState.VICTORY) {
                 // Netizen wins (AI stuck or timeout)
@@ -514,6 +574,13 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                 setRoastMessage(getRandomRoast('lose'));
             }
         }
+
+        // --- AUTO RESTART LOGIC ---
+        // Automatically restart game for VS AI and Battle Royale modes
+        if (currentMode === GameMode.LIVE_VS_AI || currentMode === GameMode.LIVE_VS_NETIZEN) {
+             setAutoRestartCountdown(10); // 10 seconds countdown
+        }
+
     }, []);
 
     // --- Connect to specific TikTok Live Stream ---
@@ -586,7 +653,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                  playerLikesRef.current[uniqueId] = newLikes;
 
                  // Check threshold (50 likes)
-                 if (newLikes >= 20) {
+                 if (newLikes >= 50) {
                      setLobbyPlayers(prev => {
                         if (prev.find(p => p.uniqueId === uniqueId)) return prev;
                         if (prev.length >= 8) return prev;
@@ -622,7 +689,6 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             }
         };
 
-
         // 2. Chat Events (Main Game Logic)
         const processChatData = (data: any) => {
              // Data structure: { uniqueId, nickname, profilePictureUrl, comment, ... }
@@ -650,7 +716,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         }]);
 
                         if (result.valid && result.entry) {
-                            setLastWinner({ name: nickname || uniqueId, word: cleanWord });
+                            setLastWinner({ name: nickname || uniqueId, word: cleanWord, id: uniqueId });
                             executeMove(result.entry.word, 'chat', result.entry.arti, result.entry.bahasa, nickname || uniqueId, profilePictureUrl, uniqueId);
                         }
                     }
@@ -687,8 +753,62 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                 (!current.isAiTurn || current.mode === GameMode.LIVE_VS_NETIZEN);
 
             if (canExecute) {
-                setLastWinner({ name: nickname || uniqueId, word: cleanWord });
-                executeMove(entry!.word, 'chat', entry!.arti, entry!.bahasa, nickname || uniqueId, profilePictureUrl, uniqueId);
+                // FAIRNESS UPDATE: BATCHING & RANDOM SELECTION FOR VS MODES
+                // Instead of immediate execution, we use a collecting phase
+                if (!current.isCollectingAnswers) {
+                    setIsCollectingAnswers(true);
+                    batchCandidatesRef.current = [];
+                    // Add first correct candidate
+                    batchCandidatesRef.current.push({
+                        entry: entry!,
+                        uniqueId,
+                        nickname: nickname || uniqueId,
+                        profilePictureUrl
+                    });
+
+                    // Start timer for 1.5 seconds to collect other correct answers
+                    setTimeout(() => {
+                         const candidates = batchCandidatesRef.current;
+                         const lastWinId = stateRef.current.lastWinner?.id;
+                         
+                         // 1. Filter out the last winner to prevent consecutive wins (Fairness)
+                         let eligible = candidates.filter(c => c.uniqueId !== lastWinId);
+                         
+                         // If everyone is the last winner (or only 1 person playing), allow them
+                         if (eligible.length === 0) eligible = candidates;
+                         
+                         // 2. Remove duplicates from same person in this batch
+                         const uniqueCandidates = Array.from(new Map(eligible.map((item): [string, BatchCandidate] => [item.uniqueId, item])).values());
+                         
+                         if (uniqueCandidates.length > 0) {
+                             // 3. Pick random winner
+                             const winner = uniqueCandidates[Math.floor(Math.random() * uniqueCandidates.length)];
+                             
+                             setLastWinner({ name: winner.nickname, word: winner.entry.word, id: winner.uniqueId });
+                             executeMove(
+                                 winner.entry.word, 
+                                 'chat', 
+                                 winner.entry.arti, 
+                                 winner.entry.bahasa, 
+                                 winner.nickname, 
+                                 winner.profilePictureUrl, 
+                                 winner.uniqueId
+                             );
+                         }
+                         
+                         setIsCollectingAnswers(false);
+                         batchCandidatesRef.current = [];
+
+                    }, 1500); // 1.5 Seconds batch window
+                } else {
+                    // Already collecting, just add to pool if valid
+                    batchCandidatesRef.current.push({
+                        entry: entry!,
+                        uniqueId,
+                        nickname: nickname || uniqueId,
+                        profilePictureUrl
+                    });
+                }
             }
         };
 
@@ -820,6 +940,8 @@ export const LiveGame: React.FC<LiveGameProps> = ({
             setLastWinner(null);
             setLiveAttempts([]);
             setRoastMessage('');
+            setIsCollectingAnswers(false);
+            batchCandidatesRef.current = [];
             
             // AI Starts first with a random word from dictionary that matches the length
             const eligibleWords = dictionary.filter(d => d.word.length === wordLength);
@@ -936,7 +1058,7 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                         <div className="flex flex-col items-center gap-2 text-white">
                             <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-lg">
                                 <Hand size={20} className="text-yellow-400" />
-                                <span>Tap Layar <b>20x</b></span>
+                                <span>Tap Layar <b>50x</b></span>
                             </div>
                             <span className="text-xs text-slate-400">- ATAU -</span>
                             <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1 rounded-lg">
@@ -1000,6 +1122,33 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                             MULAI
                         </button>
                     </div>
+
+                    {/* Past Players Recall List */}
+                    {pastPlayers.length > 0 && lobbyPlayers.length < 8 && (
+                        <div className="w-full max-w-lg mt-6 bg-slate-900/50 p-3 rounded-xl border border-white/10">
+                            <h4 className="text-xs font-bold text-slate-400 mb-2 flex items-center gap-2"><RotateCcw size={12}/> UNDANG PEMAIN LAMA</h4>
+                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                                {pastPlayers.filter(p => !lobbyPlayers.find(lp => lp.uniqueId === p.uniqueId)).map((p, idx) => (
+                                    <button 
+                                        key={`past-${idx}`}
+                                        onClick={() => invitePastPlayer(p)}
+                                        className="flex flex-col items-center gap-1 min-w-[60px] p-2 bg-slate-800 rounded-lg hover:bg-indigo-600/50 transition-colors border border-white/5 active:scale-95"
+                                    >
+                                        {p.profilePictureUrl ? (
+                                            <img src={p.profilePictureUrl} className="w-8 h-8 rounded-full" />
+                                        ) : (
+                                            <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold">{p.nickname.charAt(0)}</div>
+                                        )}
+                                        <span className="text-[9px] w-full truncate text-center">{p.nickname.slice(0,6)}</span>
+                                        <Plus size={10} className="text-emerald-400" />
+                                    </button>
+                                ))}
+                                {pastPlayers.filter(p => !lobbyPlayers.find(lp => lp.uniqueId === p.uniqueId)).length === 0 && (
+                                    <span className="text-[10px] text-slate-500 italic w-full text-center py-2">Semua pemain lama sudah di lobby</span>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -1420,6 +1569,15 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                             <span className={`text-xs font-bold uppercase tracking-widest mb-2 px-3 py-1 rounded-full border ${isAiTurn ? 'text-rose-400 border-rose-500/30 bg-rose-500/10' : 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'}`}>
                                                 {isAiTurn ? "GILIRAN AI MENJAWAB" : "GILIRAN NETIZEN"}
                                             </span>
+                                            
+                                            {/* Status Indicator for Fairness Mechanism */}
+                                            {isCollectingAnswers && (
+                                                <div className="flex items-center gap-2 bg-yellow-500/20 text-yellow-300 px-3 py-1 rounded-full text-[10px] font-bold mb-1 border border-yellow-500/40 animate-pulse">
+                                                    <Hourglass size={12} />
+                                                    <span>MENAMPUNG & MENGUNDI JAWABAN...</span>
+                                                </div>
+                                            )}
+
                                             <div className={`text-5xl md:text-7xl font-black drop-shadow-2xl ${isAiTurn ? 'text-rose-500' : 'text-emerald-400'}`}>
                                                 {requiredPrefix}...
                                             </div>
@@ -1438,7 +1596,18 @@ export const LiveGame: React.FC<LiveGameProps> = ({
                                 )}
                                 <h2 className="text-4xl font-black mb-4 uppercase">{mode === GameMode.LIVE_VS_NETIZEN ? 'RONDE SELESAI' : (gameState === GameState.VICTORY ? 'MENANG!' : 'KALAH')}</h2>
                                 <p className="text-white font-bold text-lg mb-1 italic">"{roastMessage}"</p>
-                                <button onClick={startGame} className="w-full py-4 mt-8 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold text-lg transition-colors shadow-lg">MAIN LAGI</button>
+                                
+                                {autoRestartCountdown !== null ? (
+                                    <div className="mt-8">
+                                        <div className="flex items-center justify-center gap-2 text-indigo-300 font-bold mb-2">
+                                            <Zap size={20} className="text-yellow-400 animate-pulse"/>
+                                            <span>Game Mulai Otomatis</span>
+                                        </div>
+                                        <div className="text-5xl font-black text-white">{autoRestartCountdown}</div>
+                                    </div>
+                                ) : (
+                                     <button onClick={startGame} className="w-full py-4 mt-8 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold text-lg transition-colors shadow-lg">MAIN LAGI</button>
+                                )}
                             </div>
                         )
                     )}
